@@ -21,25 +21,19 @@ import java.util.List;
 import java.util.Random;
 
 class Buffer {
-    private ByteArrayOutputStream bos;
+
+    public ByteArrayOutputStream bos;
+    public byte[] array;
     public int offset;
-    public byte[] internalArray;
 
     public Buffer() {
         this.bos = new ByteArrayOutputStream();
         this.offset = 0;
     }
 
-    public Buffer(byte[] data) {
-        this.internalArray = data;
+    public Buffer(byte[] var1) {
+        this.array = var1;
         this.offset = 0;
-    }
-
-    public byte[] toByteArray() {
-        if (bos != null) {
-            return bos.toByteArray();
-        }
-        return internalArray;
     }
 
     public void writeUnsignedByte(int value) {
@@ -51,14 +45,6 @@ class Buffer {
         bos.write((value >>> 8) & 0xFF);
         bos.write(value & 0xFF);
         offset += 2;
-    }
-
-    public void writeInt(int value) {
-        bos.write((byte)(value >> 24));
-        bos.write((byte)(value >> 16));
-        bos.write((byte)(value >> 8));
-        bos.write((byte)value);
-        offset += 4;
     }
 
     public void writeUShortSmart(int value) {
@@ -82,46 +68,38 @@ class Buffer {
             writeUnsignedByte(unsignedShortValue & 0xFF);
         }
     }
+
+    public void writeInt(int var1) {
+        this.array[++this.offset - 1] = (byte) (var1 >> 24);
+        this.array[++this.offset - 1] = (byte) (var1 >> 16);
+        this.array[++this.offset - 1] = (byte) (var1 >> 8);
+        this.array[++this.offset - 1] = (byte) var1;
+    }
+
     public int readUnsignedByte() {
-        if (offset >= internalArray.length) {
-            throw new ArrayIndexOutOfBoundsException("Attempt to read beyond buffer limit at offset " + offset + ". Buffer length: " + internalArray.length);
-        }
-        return internalArray[offset++] & 0xFF;
+        return this.array[++this.offset - 1] & 255; // L: 242
     }
 
     public int readUnsignedShort() {
-        int b1 = readUnsignedByte();
-        int b2 = readUnsignedByte();
-        return (b1 << 8) | b2;
+        this.offset += 2; // L: 250
+        return (this.array[this.offset - 1] & 255) + ((this.array[this.offset - 2] & 255) << 8); // L: 251
     }
 
     public int readInt() {
-        int b1 = readUnsignedByte();
-        int b2 = readUnsignedByte();
-        int b3 = readUnsignedByte();
-        int b4 = readUnsignedByte();
-        return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
-    }
-
-    public int readUShortSmart() {
-        int val = readUnsignedByte();
-        if (val < 128) {
-            return val;
-        } else {
-            return ((val & 0x7F) << 8) | readUnsignedByte();
-        }
+        this.offset += 4;
+        return ((this.array[this.offset - 3] & 255) << 16) + (this.array[this.offset - 1] & 255) + ((this.array[this.offset - 2] & 255) << 8) + ((this.array[this.offset - 4] & 255) << 24); // L: 268
     }
 
     public int readShortSmart() {
-        int val = readUnsignedByte();
-        if (val < 128) {
-            return val - 64;
-        } else {
-            return ((val & 0x7F) << 8 | readUnsignedByte()) - 49152;
-        }
+        int var1 = this.array[this.offset] & 255; // L: 369
+        return var1 < 128 ? this.readUnsignedByte() - 64 : this.readUnsignedShort() - 49152; // L: 370 371
+    }
+
+    public int readUShortSmart() {
+        int var1 = this.array[this.offset] & 255; // L: 375
+        return var1 < 128 ? this.readUnsignedByte() : this.readUnsignedShort() - 32768; // L: 376 377
     }
 }
-
 class ByteBufferUtils {
 
     public static void clearIntArray(int[] array, int offset, int length) {
@@ -189,7 +167,7 @@ class SoundEnvelope {
                 this.phaseIndex = this.segments - 1;
             }
 
-            this.ticks = (int)((double)this.durations[this.phaseIndex] / 65536.0D * (double) period);
+            this.ticks = (int) ((double) this.durations[this.phaseIndex] / 65536.0D * (double) period);
             if (this.ticks > this.max) {
                 this.step = ((this.phases[this.phaseIndex] << 15) - this.amplitude) / (this.ticks - this.max);
             }
@@ -240,13 +218,13 @@ class SoundFilter {
     }
 
     float adaptMagnitude(int direction, int i, float f) {
-        float alpha = (float) this.magnitudes[direction][0][i] + f * (float)(this.magnitudes[direction][1][i] - this.magnitudes[direction][0][i]);
+        float alpha = (float) this.magnitudes[direction][0][i] + f * (float) (this.magnitudes[direction][1][i] - this.magnitudes[direction][0][i]);
         alpha *= 0.0015258789F;
         return 1.0F - (float) Math.pow(10.0D, -alpha / 20.0F);
     }
 
     float adaptPhase(int direction, int i, float f) {
-        float alpha = (float) this.phases[direction][0][i] + f * (float)(this.phases[direction][1][i] - this.phases[direction][0][i]);
+        float alpha = (float) this.phases[direction][0][i] + f * (float) (this.phases[direction][1][i] - this.phases[direction][0][i]);
         alpha *= 1.2207031E-4F;
         return normalize(alpha);
     }
@@ -254,10 +232,10 @@ class SoundFilter {
     int compute(int direction, float f) {
         float magnitude;
         if (direction == 0) {
-            magnitude = (float)this.unity[0] + (float)(this.unity[1] - this.unity[0]) * f;
+            magnitude = (float) this.unity[0] + (float) (this.unity[1] - this.unity[0]) * f;
             magnitude *= 0.0030517578F;
-            forwardMinimizedCoefficientMultiplier = (float)Math.pow(0.1D, magnitude / 20.0F);
-            forwardMultiplier = (int)(forwardMinimizedCoefficientMultiplier * 65536.0F);
+            forwardMinimizedCoefficientMultiplier = (float) Math.pow(0.1D, magnitude / 20.0F);
+            forwardMultiplier = (int) (forwardMinimizedCoefficientMultiplier * 65536.0F);
         }
 
         if (this.pairs[direction] == 0) {
@@ -295,7 +273,7 @@ class SoundFilter {
             }
 
             for (pair = 0; pair < this.pairs[direction] * 2; ++pair) {
-                coefficients[direction][pair] = (int)(minimizedCoefficients[direction][pair] * 65536.0F);
+                coefficients[direction][pair] = (int) (minimizedCoefficients[direction][pair] * 65536.0F);
             }
 
             return this.pairs[direction] * 2;
@@ -446,7 +424,7 @@ class SoundTone {
         toneSine = new int[32768];
 
         for (toneID = 0; toneID < 32768; ++toneID) {
-            toneSine[toneID] = (int)(Math.sin((double) toneID / 5215.1903D) * 16384.0D);
+            toneSine[toneID] = (int) (Math.sin((double) toneID / 5215.1903D) * 16384.0D);
         }
 
         toneSamples = new int[220500];
@@ -807,21 +785,6 @@ class SoundTone {
     }
 }
 
-class AudioDataSource {
-    byte[] audioDataByte; // Changed to byte[] as mix() now returns byte[]
-    int sampleRate;
-    int startSample; // Added to match constructor usage in SoundEffect
-    int endSample;   // Added to match constructor usage in SoundEffect
-
-    // Constructor for byte[]
-    public AudioDataSource(int sampleRate, byte[] audioDataByte, int start, int end) {
-        this.sampleRate = sampleRate;
-        this.audioDataByte = audioDataByte;
-        this.startSample = start;
-        this.endSample = end;
-    }
-}
-
 // Integrated SoundEffect class
 class SoundEffect {
 
@@ -881,18 +844,13 @@ class SoundEffect {
                             var9 = var9 >> 31 ^ 127;
                         }
 
-                        var3[var8 + var6] = (byte)var9;
+                        var3[var8 + var6] = (byte) var9;
                     }
                 }
             }
 
             return var3;
         }
-    }
-
-    public AudioDataSource toRawSound() {
-        new Thread(() -> rawAudioData = this.mix()).start();
-        return new AudioDataSource(22050, rawAudioData, this.start * 22050 / 1000, this.end * 22050 / 1000);
     }
 
     public byte[] encode() {
@@ -906,10 +864,9 @@ class SoundEffect {
         }
         buffer.writeUnsignedShort(this.start);
         buffer.writeUnsignedShort(this.end);
-        return buffer.toByteArray();
+        return buffer.array;
     }
 }
-
 
 public class SoundEffectEditor extends JFrame {
 
@@ -1019,7 +976,7 @@ public class SoundEffectEditor extends JFrame {
 
 
     public SoundEffectEditor() {
-        setTitle("JagFX Editor - RuneScape Sound Effects v1");
+        setTitle("JagFX Editor: RuneScape Sound Effects v2");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1400, 900);
         setLocationRelativeTo(null);
@@ -1159,20 +1116,44 @@ public class SoundEffectEditor extends JFrame {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.WEST;
 
-        gbc.gridx = 0; gbc.gridy = 0; toneParamsContent.add(createLabel("Duration (ms):"), gbc);
-        gbc.gridx = 1; gbc.gridy = 0; gbc.weightx = 1.0; durationSlider = createSlider(0, 5000, 500); toneParamsContent.add(durationSlider, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        toneParamsContent.add(createLabel("Duration (ms):"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = 0;
+        gbc.weightx = 1.0;
+        durationSlider = createSlider(0, 5000, 500);
+        toneParamsContent.add(durationSlider, gbc);
         gbc.weightx = 0;
 
-        gbc.gridx = 0; gbc.gridy = 1; toneParamsContent.add(createLabel("Offset (ms):"), gbc);
-        gbc.gridx = 1; gbc.gridy = 1; gbc.weightx = 1.0; offsetSlider = createSlider(0, 2000, 0); toneParamsContent.add(offsetSlider, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        toneParamsContent.add(createLabel("Offset (ms):"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = 1;
+        gbc.weightx = 1.0;
+        offsetSlider = createSlider(0, 2000, 0);
+        toneParamsContent.add(offsetSlider, gbc);
         gbc.weightx = 0;
 
-        gbc.gridx = 0; gbc.gridy = 2; toneParamsContent.add(createLabel("Delay Time (ms):"), gbc);
-        gbc.gridx = 1; gbc.gridy = 2; gbc.weightx = 1.0; delayTimeSlider = createSlider(0, 1000, 0); toneParamsContent.add(delayTimeSlider, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        toneParamsContent.add(createLabel("Delay Time (ms):"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = 2;
+        gbc.weightx = 1.0;
+        delayTimeSlider = createSlider(0, 1000, 0);
+        toneParamsContent.add(delayTimeSlider, gbc);
         gbc.weightx = 0;
 
-        gbc.gridx = 0; gbc.gridy = 3; toneParamsContent.add(createLabel("Delay Decay (%):"), gbc);
-        gbc.gridx = 1; gbc.gridy = 3; gbc.weightx = 1.0; delayDecaySlider = createSlider(0, 100, 100); toneParamsContent.add(delayDecaySlider, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = 3;
+        toneParamsContent.add(createLabel("Delay Decay (%):"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = 3;
+        gbc.weightx = 1.0;
+        delayDecaySlider = createSlider(0, 100, 100);
+        toneParamsContent.add(delayDecaySlider, gbc);
         gbc.weightx = 0;
 
         gbc.gridy = 4;
@@ -1209,7 +1190,10 @@ public class SoundEffectEditor extends JFrame {
         oscillatorListPanel.setBackground(PANEL_BG);
         oscillatorListPanel.add(oscListScrollPane, BorderLayout.CENTER);
 
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridheight = 3; gbc.fill = GridBagConstraints.BOTH;
+        gbc.gridx = 0;
+        gbc.gridy = 5;
+        gbc.gridheight = 3;
+        gbc.fill = GridBagConstraints.BOTH;
         toneParamsContent.add(oscillatorListPanel, gbc);
         gbc.gridheight = 1;
 
@@ -1221,21 +1205,44 @@ public class SoundEffectEditor extends JFrame {
         oscGbc.fill = GridBagConstraints.HORIZONTAL;
         oscGbc.anchor = GridBagConstraints.WEST;
 
-        oscGbc.gridx = 0; oscGbc.gridy = 0; currentOscillatorParametersPanel.add(createLabel("Volume:"), oscGbc);
-        oscGbc.gridx = 1; oscGbc.gridy = 0; oscGbc.weightx = 1.0; oscVolumeSlider = createSlider(0, 65535, 0); currentOscillatorParametersPanel.add(oscVolumeSlider, oscGbc); // Changed max to 65535
+        oscGbc.gridx = 0;
+        oscGbc.gridy = 0;
+        currentOscillatorParametersPanel.add(createLabel("Volume:"), oscGbc);
+        oscGbc.gridx = 1;
+        oscGbc.gridy = 0;
+        oscGbc.weightx = 1.0;
+        oscVolumeSlider = createSlider(0, 65535, 0);
+        currentOscillatorParametersPanel.add(oscVolumeSlider, oscGbc); // Changed max to 65535
         oscGbc.weightx = 0;
 
-        oscGbc.gridx = 0; oscGbc.gridy = 1; currentOscillatorParametersPanel.add(createLabel("Pitch:"), oscGbc);
-        oscGbc.gridx = 1; oscGbc.gridy = 1; oscGbc.weightx = 1.0; oscPitchSlider = createSlider(-100, 100, 0); currentOscillatorParametersPanel.add(oscPitchSlider, oscGbc);
+        oscGbc.gridx = 0;
+        oscGbc.gridy = 1;
+        currentOscillatorParametersPanel.add(createLabel("Pitch:"), oscGbc);
+        oscGbc.gridx = 1;
+        oscGbc.gridy = 1;
+        oscGbc.weightx = 1.0;
+        oscPitchSlider = createSlider(-100, 100, 0);
+        currentOscillatorParametersPanel.add(oscPitchSlider, oscGbc);
         oscGbc.weightx = 0;
 
-        oscGbc.gridx = 0; oscGbc.gridy = 2; currentOscillatorParametersPanel.add(createLabel("Delay:"), oscGbc);
-        oscGbc.gridx = 1; oscGbc.gridy = 2; oscGbc.weightx = 1.0; oscDelaySlider = createSlider(0, 9, 0); currentOscillatorParametersPanel.add(oscDelaySlider, oscGbc); // Delay type 0-9
+        oscGbc.gridx = 0;
+        oscGbc.gridy = 2;
+        currentOscillatorParametersPanel.add(createLabel("Delay:"), oscGbc);
+        oscGbc.gridx = 1;
+        oscGbc.gridy = 2;
+        oscGbc.weightx = 1.0;
+        oscDelaySlider = createSlider(0, 9, 0);
+        currentOscillatorParametersPanel.add(oscDelaySlider, oscGbc); // Delay type 0-9
         oscGbc.weightx = 0;
 
-        gbc.gridx = 1; gbc.gridy = 5; gbc.gridheight = 3; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH;
+        gbc.gridx = 1;
+        gbc.gridy = 5;
+        gbc.gridheight = 3;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
         toneParamsContent.add(currentOscillatorParametersPanel, gbc);
-        gbc.gridheight = 1; gbc.weightx = 0; // Reset gridheight and weightx
+        gbc.gridheight = 1;
+        gbc.weightx = 0; // Reset gridheight and weightx
 
         soundToneParametersPanel.add(new JScrollPane(toneParamsContent), BorderLayout.CENTER);
         centerRightSplitPane.setTopComponent(soundToneParametersPanel);
@@ -1320,28 +1327,52 @@ public class SoundEffectEditor extends JFrame {
         filterPanel.setBorder(BorderFactory.createTitledBorder(new LineBorder(BORDER_COLOR), "Sound Filter"));
         int filterRow = 0;
 
-        gbc.gridx = 0; gbc.gridy = filterRow; filterEnabledCheckbox = new JCheckBox("Enable Filter");
+        gbc.gridx = 0;
+        gbc.gridy = filterRow;
+        filterEnabledCheckbox = new JCheckBox("Enable Filter");
         filterEnabledCheckbox.setBackground(PANEL_BG);
         filterEnabledCheckbox.setForeground(TEXT_COLOR_LIGHT);
         filterEnabledCheckbox.setFont(filterEnabledCheckbox.getFont().deriveFont(Font.PLAIN, 11f));
-        gbc.gridwidth = 2; filterPanel.add(filterEnabledCheckbox, gbc);
-        gbc.gridwidth = 1; filterRow++;
+        gbc.gridwidth = 2;
+        filterPanel.add(filterEnabledCheckbox, gbc);
+        gbc.gridwidth = 1;
+        filterRow++;
 
-        gbc.gridx = 0; gbc.gridy = filterRow; filterPanel.add(createLabel("Unity 0:"), gbc);
-        gbc.gridx = 1; gbc.gridy = filterRow++; filterUnity0Slider = createSlider(0, 65535, 0); filterPanel.add(filterUnity0Slider, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = filterRow;
+        filterPanel.add(createLabel("Unity 0:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = filterRow++;
+        filterUnity0Slider = createSlider(0, 65535, 0);
+        filterPanel.add(filterUnity0Slider, gbc);
 
-        gbc.gridx = 0; gbc.gridy = filterRow; filterPanel.add(createLabel("Unity 1:"), gbc);
-        gbc.gridx = 1; gbc.gridy = filterRow++; filterUnity1Slider = createSlider(0, 65535, 0); filterPanel.add(filterUnity1Slider, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = filterRow;
+        filterPanel.add(createLabel("Unity 1:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = filterRow++;
+        filterUnity1Slider = createSlider(0, 65535, 0);
+        filterPanel.add(filterUnity1Slider, gbc);
 
         // NEW: Filter Pairs
-        gbc.gridx = 0; gbc.gridy = filterRow; filterPanel.add(createLabel("Pairs 0:"), gbc);
-        gbc.gridx = 1; gbc.gridy = filterRow++; filterPairs0Slider = createSlider(0, 4, 0); filterPanel.add(filterPairs0Slider, gbc); // Max 4 pairs
+        gbc.gridx = 0;
+        gbc.gridy = filterRow;
+        filterPanel.add(createLabel("Pairs 0:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = filterRow++;
+        filterPairs0Slider = createSlider(0, 4, 0);
+        filterPanel.add(filterPairs0Slider, gbc); // Max 4 pairs
         filterPairs0Slider.setMajorTickSpacing(1); // Set major tick spacing to 1
         filterPairs0Slider.setMinorTickSpacing(1); // Set minor tick spacing to 1
         filterPairs0Slider.setPaintLabels(true); // Show labels for ticks
 
-        gbc.gridx = 0; gbc.gridy = filterRow; filterPanel.add(createLabel("Pairs 1:"), gbc);
-        gbc.gridx = 1; gbc.gridy = filterRow++; filterPairs1Slider = createSlider(0, 4, 0); filterPanel.add(filterPairs1Slider, gbc); // Max 4 pairs
+        gbc.gridx = 0;
+        gbc.gridy = filterRow;
+        filterPanel.add(createLabel("Pairs 1:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = filterRow++;
+        filterPairs1Slider = createSlider(0, 4, 0);
+        filterPanel.add(filterPairs1Slider, gbc); // Max 4 pairs
         filterPairs1Slider.setMajorTickSpacing(1); // Set major tick spacing to 1
         filterPairs1Slider.setMinorTickSpacing(1); // Set minor tick spacing to 1
         filterPairs1Slider.setPaintLabels(true); // Show labels for ticks
@@ -1349,10 +1380,14 @@ public class SoundEffectEditor extends JFrame {
         filterPairsPanel = new JPanel(new GridBagLayout());
         filterPairsPanel.setBackground(PANEL_BG);
         filterPairsPanel.setBorder(BorderFactory.createTitledBorder(new LineBorder(BORDER_COLOR), "Filter Coefficients"));
-        gbc.gridx = 0; gbc.gridy = filterRow;
-        gbc.gridwidth = 2; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH;
+        gbc.gridx = 0;
+        gbc.gridy = filterRow;
+        gbc.gridwidth = 2;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
         filterPanel.add(new JScrollPane(filterPairsPanel), gbc); // Wrap in scroll pane
-        gbc.gridwidth = 1; gbc.weighty = 0; // Reset
+        gbc.gridwidth = 1;
+        gbc.weighty = 0; // Reset
 
         envelopeAndFilterPanel.add(filterPanel);
 
@@ -1523,22 +1558,36 @@ public class SoundEffectEditor extends JFrame {
         int row = 0;
 
         if (enabledCheckbox != null) {
-            gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2;
+            gbc.gridx = 0;
+            gbc.gridy = row;
+            gbc.gridwidth = 2;
             enabledCheckbox.setBackground(PANEL_BG);
             enabledCheckbox.setForeground(TEXT_COLOR_LIGHT); // Changed to light text
             enabledCheckbox.setFont(enabledCheckbox.getFont().deriveFont(Font.PLAIN, 11f));
             panel.add(enabledCheckbox, gbc);
-            gbc.gridwidth = 1; row++;
+            gbc.gridwidth = 1;
+            row++;
         }
 
-        gbc.gridx = 0; gbc.gridy = row; panel.add(createLabel("Form:"), gbc);
-        gbc.gridx = 1; gbc.gridy = row++; panel.add(formComboBox, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        panel.add(createLabel("Form:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = row++;
+        panel.add(formComboBox, gbc);
 
-        gbc.gridx = 0; gbc.gridy = row; panel.add(createLabel("Start:"), gbc);
-        gbc.gridx = 1; gbc.gridy = row++; panel.add(startField, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        panel.add(createLabel("Start:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = row++;
+        panel.add(startField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = row; panel.add(createLabel("End:"), gbc);
-        gbc.gridx = 1; gbc.gridy = row;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        panel.add(createLabel("End:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridy = row;
         panel.add(endField, gbc);
 
         return panel;
@@ -1782,7 +1831,9 @@ public class SoundEffectEditor extends JFrame {
         gbc.anchor = GridBagConstraints.WEST;
 
         // Direction 0 (Input)
-        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 4;
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 4;
         filterPairsPanel.add(createLabel("Direction 0 (Input)"), gbc);
         gbc.gridwidth = 1;
 
@@ -1793,45 +1844,88 @@ public class SoundEffectEditor extends JFrame {
             gbc.gridy++;
             filterPairsPanel.add(createLabel("Pair " + (i + 1) + " (0):"), gbc);
 
-            gbc.gridx = 1; filterPairsPanel.add(createLabel("Phase 0:"), gbc);
+            gbc.gridx = 1;
+            filterPairsPanel.add(createLabel("Phase 0:"), gbc);
             JTextField phase0Field = createTextField(String.valueOf(currentlyEditedTone.filter.phases[0][0][i]));
             phase0Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterPhase(0, 0, pairIndex, phase0Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterPhase(0, 0, pairIndex, phase0Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterPhase(0, 0, pairIndex, phase0Field); }
-            });
-            gbc.gridx = 2; filterPairsPanel.add(phase0Field, gbc);
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterPhase(0, 0, pairIndex, phase0Field);
+                }
 
-            gbc.gridx = 3; filterPairsPanel.add(createLabel("Mag 0:"), gbc);
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterPhase(0, 0, pairIndex, phase0Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterPhase(0, 0, pairIndex, phase0Field);
+                }
+            });
+            gbc.gridx = 2;
+            filterPairsPanel.add(phase0Field, gbc);
+
+            gbc.gridx = 3;
+            filterPairsPanel.add(createLabel("Mag 0:"), gbc);
             JTextField mag0Field = createTextField(String.valueOf(currentlyEditedTone.filter.magnitudes[0][0][i]));
             mag0Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterMagnitude(0, 0, pairIndex, mag0Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterMagnitude(0, 0, pairIndex, mag0Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterMagnitude(0, 0, pairIndex, mag0Field); }
-            });
-            gbc.gridx = 4; filterPairsPanel.add(mag0Field, gbc);
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(0, 0, pairIndex, mag0Field);
+                }
 
-            gbc.gridx = 1; gbc.gridy++; filterPairsPanel.add(createLabel("Phase 1:"), gbc);
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(0, 0, pairIndex, mag0Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(0, 0, pairIndex, mag0Field);
+                }
+            });
+            gbc.gridx = 4;
+            filterPairsPanel.add(mag0Field, gbc);
+
+            gbc.gridx = 1;
+            gbc.gridy++;
+            filterPairsPanel.add(createLabel("Phase 1:"), gbc);
             JTextField phase1Field = createTextField(String.valueOf(currentlyEditedTone.filter.phases[0][1][i]));
             phase1Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterPhase(0, 1, pairIndex, phase1Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterPhase(0, 1, pairIndex, phase1Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterPhase(0, 1, pairIndex, phase1Field); }
-            });
-            gbc.gridx = 2; filterPairsPanel.add(phase1Field, gbc);
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterPhase(0, 1, pairIndex, phase1Field);
+                }
 
-            gbc.gridx = 3; filterPairsPanel.add(createLabel("Mag 1:"), gbc);
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterPhase(0, 1, pairIndex, phase1Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterPhase(0, 1, pairIndex, phase1Field);
+                }
+            });
+            gbc.gridx = 2;
+            filterPairsPanel.add(phase1Field, gbc);
+
+            gbc.gridx = 3;
+            filterPairsPanel.add(createLabel("Mag 1:"), gbc);
             JTextField mag1Field = createTextField(String.valueOf(currentlyEditedTone.filter.magnitudes[0][1][i]));
             mag1Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterMagnitude(0, 1, pairIndex, mag1Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterMagnitude(0, 1, pairIndex, mag1Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterMagnitude(0, 1, pairIndex, mag1Field); }
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(0, 1, pairIndex, mag1Field);
+                }
+
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(0, 1, pairIndex, mag1Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(0, 1, pairIndex, mag1Field);
+                }
             });
-            gbc.gridx = 4; filterPairsPanel.add(mag1Field, gbc);
+            gbc.gridx = 4;
+            filterPairsPanel.add(mag1Field, gbc);
         }
 
         // Direction 1 (Output)
-        gbc.gridx = 0; gbc.gridy++; gbc.gridwidth = 4;
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.gridwidth = 4;
         filterPairsPanel.add(createLabel("Direction 1 (Output)"), gbc);
         gbc.gridwidth = 1;
 
@@ -1842,41 +1936,82 @@ public class SoundEffectEditor extends JFrame {
             gbc.gridy++;
             filterPairsPanel.add(createLabel("Pair " + (i + 1) + " (1):"), gbc);
 
-            gbc.gridx = 1; filterPairsPanel.add(createLabel("Phase 0:"), gbc);
+            gbc.gridx = 1;
+            filterPairsPanel.add(createLabel("Phase 0:"), gbc);
             JTextField phase0Field = createTextField(String.valueOf(currentlyEditedTone.filter.phases[1][0][i]));
             phase0Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterPhase(1, 0, pairIndex, phase0Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterPhase(1, 0, pairIndex, phase0Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterPhase(1, 0, pairIndex, phase0Field); }
-            });
-            gbc.gridx = 2; filterPairsPanel.add(phase0Field, gbc);
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterPhase(1, 0, pairIndex, phase0Field);
+                }
 
-            gbc.gridx = 3; filterPairsPanel.add(createLabel("Mag 0:"), gbc);
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterPhase(1, 0, pairIndex, phase0Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterPhase(1, 0, pairIndex, phase0Field);
+                }
+            });
+            gbc.gridx = 2;
+            filterPairsPanel.add(phase0Field, gbc);
+
+            gbc.gridx = 3;
+            filterPairsPanel.add(createLabel("Mag 0:"), gbc);
             JTextField mag0Field = createTextField(String.valueOf(currentlyEditedTone.filter.magnitudes[1][0][i]));
             mag0Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterMagnitude(1, 0, pairIndex, mag0Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterMagnitude(1, 0, pairIndex, mag0Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterMagnitude(1, 0, pairIndex, mag0Field); }
-            });
-            gbc.gridx = 4; filterPairsPanel.add(mag0Field, gbc);
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(1, 0, pairIndex, mag0Field);
+                }
 
-            gbc.gridx = 1; gbc.gridy++; filterPairsPanel.add(createLabel("Phase 1:"), gbc);
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(1, 0, pairIndex, mag0Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(1, 0, pairIndex, mag0Field);
+                }
+            });
+            gbc.gridx = 4;
+            filterPairsPanel.add(mag0Field, gbc);
+
+            gbc.gridx = 1;
+            gbc.gridy++;
+            filterPairsPanel.add(createLabel("Phase 1:"), gbc);
             JTextField phase1Field = createTextField(String.valueOf(currentlyEditedTone.filter.phases[1][1][i]));
             phase1Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterPhase(1, 1, pairIndex, phase1Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterPhase(1, 1, pairIndex, phase1Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterPhase(1, 1, pairIndex, phase1Field); }
-            });
-            gbc.gridx = 2; filterPairsPanel.add(phase1Field, gbc);
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterPhase(1, 1, pairIndex, phase1Field);
+                }
 
-            gbc.gridx = 3; filterPairsPanel.add(createLabel("Mag 1:"), gbc);
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterPhase(1, 1, pairIndex, phase1Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterPhase(1, 1, pairIndex, phase1Field);
+                }
+            });
+            gbc.gridx = 2;
+            filterPairsPanel.add(phase1Field, gbc);
+
+            gbc.gridx = 3;
+            filterPairsPanel.add(createLabel("Mag 1:"), gbc);
             JTextField mag1Field = createTextField(String.valueOf(currentlyEditedTone.filter.magnitudes[1][1][i]));
             mag1Field.getDocument().addDocumentListener(new DocumentListener() {
-                public void changedUpdate(DocumentEvent e) { updateFilterMagnitude(1, 1, pairIndex, mag1Field); }
-                public void removeUpdate(DocumentEvent e) { updateFilterMagnitude(1, 1, pairIndex, mag1Field); }
-                public void insertUpdate(DocumentEvent e) { updateFilterMagnitude(1, 1, pairIndex, mag1Field); }
+                public void changedUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(1, 1, pairIndex, mag1Field);
+                }
+
+                public void removeUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(1, 1, pairIndex, mag1Field);
+                }
+
+                public void insertUpdate(DocumentEvent e) {
+                    updateFilterMagnitude(1, 1, pairIndex, mag1Field);
+                }
             });
-            gbc.gridx = 4; filterPairsPanel.add(mag1Field, gbc);
+            gbc.gridx = 4;
+            filterPairsPanel.add(mag1Field, gbc);
         }
 
         filterPairsPanel.revalidate();
@@ -1980,18 +2115,30 @@ public class SoundEffectEditor extends JFrame {
                         else if (field == volumeEnvelopeStartField) currentlyEditedTone.volume.start = parsedValue;
                         else if (field == volumeEnvelopeEndField) currentlyEditedTone.volume.end = parsedValue;
                             // For optional envelopes, check if the object itself is not null before accessing its fields
-                        else if (field == pitchModifierStartField && currentlyEditedTone.pitchModifier != null) currentlyEditedTone.pitchModifier.start = parsedValue;
-                        else if (field == pitchModifierEndField && currentlyEditedTone.pitchModifier != null) currentlyEditedTone.pitchModifier.end = parsedValue;
-                        else if (field == pitchModifierAmplitudeStartField && currentlyEditedTone.pitchModifierAmplitude != null) currentlyEditedTone.pitchModifierAmplitude.start = parsedValue;
-                        else if (field == pitchModifierAmplitudeEndField && currentlyEditedTone.pitchModifierAmplitude != null) currentlyEditedTone.pitchModifierAmplitude.end = parsedValue;
-                        else if (field == volumeMultiplierStartField && currentlyEditedTone.volumeMultiplier != null) currentlyEditedTone.volumeMultiplier.start = parsedValue;
-                        else if (field == volumeMultiplierEndField && currentlyEditedTone.volumeMultiplier != null) currentlyEditedTone.volumeMultiplier.end = parsedValue;
-                        else if (field == volumeMultiplierAmplitudeStartField && currentlyEditedTone.volumeMultiplierAmplitude != null) currentlyEditedTone.volumeMultiplierAmplitude.start = parsedValue;
-                        else if (field == volumeMultiplierAmplitudeEndField && currentlyEditedTone.volumeMultiplierAmplitude != null) currentlyEditedTone.volumeMultiplierAmplitude.end = parsedValue;
-                        else if (field == releaseStartField && currentlyEditedTone.release != null) currentlyEditedTone.release.start = parsedValue;
-                        else if (field == releaseEndField && currentlyEditedTone.release != null) currentlyEditedTone.release.end = parsedValue;
-                        else if (field == attackStartField && currentlyEditedTone.attack != null) currentlyEditedTone.attack.start = parsedValue;
-                        else if (field == attackEndField && currentlyEditedTone.attack != null) currentlyEditedTone.attack.end = parsedValue;
+                        else if (field == pitchModifierStartField && currentlyEditedTone.pitchModifier != null)
+                            currentlyEditedTone.pitchModifier.start = parsedValue;
+                        else if (field == pitchModifierEndField && currentlyEditedTone.pitchModifier != null)
+                            currentlyEditedTone.pitchModifier.end = parsedValue;
+                        else if (field == pitchModifierAmplitudeStartField && currentlyEditedTone.pitchModifierAmplitude != null)
+                            currentlyEditedTone.pitchModifierAmplitude.start = parsedValue;
+                        else if (field == pitchModifierAmplitudeEndField && currentlyEditedTone.pitchModifierAmplitude != null)
+                            currentlyEditedTone.pitchModifierAmplitude.end = parsedValue;
+                        else if (field == volumeMultiplierStartField && currentlyEditedTone.volumeMultiplier != null)
+                            currentlyEditedTone.volumeMultiplier.start = parsedValue;
+                        else if (field == volumeMultiplierEndField && currentlyEditedTone.volumeMultiplier != null)
+                            currentlyEditedTone.volumeMultiplier.end = parsedValue;
+                        else if (field == volumeMultiplierAmplitudeStartField && currentlyEditedTone.volumeMultiplierAmplitude != null)
+                            currentlyEditedTone.volumeMultiplierAmplitude.start = parsedValue;
+                        else if (field == volumeMultiplierAmplitudeEndField && currentlyEditedTone.volumeMultiplierAmplitude != null)
+                            currentlyEditedTone.volumeMultiplierAmplitude.end = parsedValue;
+                        else if (field == releaseStartField && currentlyEditedTone.release != null)
+                            currentlyEditedTone.release.start = parsedValue;
+                        else if (field == releaseEndField && currentlyEditedTone.release != null)
+                            currentlyEditedTone.release.end = parsedValue;
+                        else if (field == attackStartField && currentlyEditedTone.attack != null)
+                            currentlyEditedTone.attack.start = parsedValue;
+                        else if (field == attackEndField && currentlyEditedTone.attack != null)
+                            currentlyEditedTone.attack.end = parsedValue;
 
                         // Only restart timer if parsing was successful
                         debounceTimer.restart();
@@ -2011,9 +2158,21 @@ public class SoundEffectEditor extends JFrame {
                     }
                 }
             }
-            @Override public void insertUpdate(DocumentEvent e) { updateValue(); }
-            @Override public void removeUpdate(DocumentEvent e) { updateValue(); }
-            @Override public void changedUpdate(DocumentEvent e) { updateValue(); }
+
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                updateValue();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                updateValue();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                updateValue();
+            }
         });
 
         // Apply listeners to all envelope text fields
@@ -2266,7 +2425,7 @@ public class SoundEffectEditor extends JFrame {
      * The input `samples` array is assumed to contain 16-bit signed values
      * (e.g., -32768 to 32767) stored in Java `int` primitives.
      *
-     * @param samples The input array of integer samples (16-bit).
+     * @param samples        The input array of integer samples (16-bit).
      * @param targetBitDepth The desired output bit depth (8 or 16).
      * @return A new byte array containing the converted audio data.
      */
@@ -2377,8 +2536,7 @@ public class SoundEffectEditor extends JFrame {
         }
 
         try {
-            SoundEffect soundEffectToPlay = newSoundEffectInstance();
-            byte[] rawSamples8Bit = soundEffectToPlay.toRawSound().audioDataByte;
+            byte[] rawSamples8Bit = newSoundEffectInstance().rawAudioData;
             byte[] audioDataForPlayback;
             if (outputBitDepth == 8) {
                 audioDataForPlayback = rawSamples8Bit;
@@ -2533,8 +2691,7 @@ public class SoundEffectEditor extends JFrame {
             }
 
             try {
-                SoundEffect tempSoundEffect = newSoundEffectInstance();
-                byte[] combinedRawSamples8Bit = tempSoundEffect.toRawSound().audioDataByte;
+                byte[] combinedRawSamples8Bit = newSoundEffectInstance().mix();
                 byte[] wavData16Bit = new byte[combinedRawSamples8Bit.length * 2];
                 for (int i = 0; i < combinedRawSamples8Bit.length; i++) {
                     short sample16 = (short) (combinedRawSamples8Bit[i] * 256);
