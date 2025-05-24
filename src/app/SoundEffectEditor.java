@@ -20,86 +20,108 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
+// Custom Buffer class for reading/writing binary data, mimicking a byte buffer.
 class Buffer {
 
-    public ByteArrayOutputStream bos;
-    public byte[] array;
-    public int offset;
+    public ByteArrayOutputStream bos; // Used for writing
+    public byte[] array; // Used for reading
+    public int offset; // Current position in the buffer
 
+    // Constructor for writing
     public Buffer() {
         this.bos = new ByteArrayOutputStream();
         this.offset = 0;
     }
 
+    // Constructor for reading (from an existing byte array)
     public Buffer(byte[] var1) {
         this.array = var1;
         this.offset = 0;
     }
 
+    // Writes an unsigned byte (0-255) to the buffer.
     public void writeUnsignedByte(int value) {
-        bos.write(value & 0xFF);
+        bos.write(value & 0xFF); // Ensure only the lower 8 bits are written
         offset++;
     }
 
+    // Writes an unsigned short (0-65535) to the buffer (big-endian).
     public void writeUnsignedShort(int value) {
-        bos.write((value >>> 8) & 0xFF);
-        bos.write(value & 0xFF);
+        bos.write((value >>> 8) & 0xFF); // High byte
+        bos.write(value & 0xFF);         // Low byte
         offset += 2;
     }
 
+    // Writes a "smart" unsigned short. If value < 128, writes 1 byte. Else, writes 2 bytes (with MSB set).
     public void writeUShortSmart(int value) {
         if (value < 128) {
             writeUnsignedByte(value);
         } else {
-            writeUnsignedByte((value >>> 8) | 0x80);
-            writeUnsignedByte(value & 0xFF);
+            // For 2-byte unsigned smart values, the value written should be original_value + 32768
+            // so that readUShortSmart() - 32768 gives back the original value.
+            int encodedValue = value + 32768;
+            // Ensure the encodedValue fits within a 16-bit unsigned range (0-65535)
+            if (encodedValue < 0 || encodedValue > 65535) {
+                throw new IllegalArgumentException("Value out of range for 2-byte UShortSmart encoding: " + value + " (encoded: " + encodedValue + ")");
+            }
+            writeUnsignedByte(((encodedValue >>> 8) & 0xFF) | 0x80); // Set MSB on the first byte
+            writeUnsignedByte(encodedValue & 0xFF);
         }
     }
 
+    // Writes a "smart" signed short. Handles values in a specific range.
     public void writeShortSmart(int value) {
         if (value >= -64 && value < 64) {
             writeUnsignedByte(value + 64);
         } else {
-            int unsignedShortValue = value + 49152;
-            if (unsignedShortValue < 0 || unsignedShortValue >= 32768) {
-                throw new IllegalArgumentException("Value out of range for ShortSmart: " + value + " (calculated unsigned: " + unsignedShortValue + ")");
-            }
-            writeUnsignedByte((unsignedShortValue >>> 8) | 0x80);
+            int unsignedShortValue = value + 49152; // Adjust to unsigned range
+            writeUnsignedByte((unsignedShortValue >>> 8) | 0x80); // Set MSB
             writeUnsignedByte(unsignedShortValue & 0xFF);
         }
     }
 
+    // Writes an integer (4 bytes) to the buffer (big-endian).
     public void writeInt(int var1) {
-        this.array[++this.offset - 1] = (byte) (var1 >> 24);
-        this.array[++this.offset - 1] = (byte) (var1 >> 16);
-        this.array[++this.offset - 1] = (byte) (var1 >> 8);
-        this.array[++this.offset - 1] = (byte) var1;
+        bos.write((var1 >>> 24) & 0xFF);
+        bos.write((var1 >>> 16) & 0xFF);
+        bos.write((var1 >>> 8) & 0xFF);
+        bos.write(var1 & 0xFF);
+        offset += 4;
     }
 
+    // Reads an unsigned byte (0-255) from the buffer.
     public int readUnsignedByte() {
-        return this.array[++this.offset - 1] & 255; // L: 242
+        return this.array[++this.offset - 1] & 255;
     }
 
+    // Reads an unsigned short (0-65535) from the buffer (big-endian).
     public int readUnsignedShort() {
-        this.offset += 2; // L: 250
-        return (this.array[this.offset - 1] & 255) + ((this.array[this.offset - 2] & 255) << 8); // L: 251
+        this.offset += 2;
+        return (this.array[this.offset - 1] & 255) + ((this.array[this.offset - 2] & 255) << 8);
     }
 
+    // Reads an integer (4 bytes) from the buffer (big-endian).
     public int readInt() {
         this.offset += 4;
-        return ((this.array[this.offset - 3] & 255) << 16) + (this.array[this.offset - 1] & 255) + ((this.array[this.offset - 2] & 255) << 8) + ((this.array[this.offset - 4] & 255) << 24); // L: 268
+        return ((this.array[this.offset - 3] & 255) << 16) + (this.array[this.offset - 1] & 255) + ((this.array[this.offset - 2] & 255) << 8) + ((this.array[this.offset - 4] & 255) << 24);
     }
 
+    // Reads a "smart" signed short.
     public int readShortSmart() {
-        int var1 = this.array[this.offset] & 255; // L: 369
-        return var1 < 128 ? this.readUnsignedByte() - 64 : this.readUnsignedShort() - 49152; // L: 370 371
+        int var1 = this.array[this.offset] & 255;
+        // If MSB is not set, it's a 1-byte value. Else, it's a 2-byte value.
+        return var1 < 128 ? this.readUnsignedByte() - 64 : this.readUnsignedShort() - 49152;
     }
 
+    // Reads a "smart" unsigned short.
     public int readUShortSmart() {
-        int var1 = this.array[this.offset] & 255; // L: 375
-        return var1 < 128 ? this.readUnsignedByte() : this.readUnsignedShort() - 32768; // L: 376 377
+        int var1 = this.array[this.offset] & 255;
+        // If MSB is not set, it's a 1-byte value. Else, it's a 2-byte value.
+        return var1 < 128 ? this.readUnsignedByte() : this.readUnsignedShort() - 32768; // -32768 adjusts for the 0x8000 (32768) offset when MSB is set.
     }
 }
+
+// Utility class for byte buffer operations (e.g., clearing arrays).
 class ByteBufferUtils {
 
     public static void clearIntArray(int[] array, int offset, int length) {
@@ -107,32 +129,33 @@ class ByteBufferUtils {
             array[i] = 0;
         }
     }
-
 }
 
+// Represents a sound envelope, defining how a parameter (like pitch or volume) changes over time.
 class SoundEnvelope {
 
-    int segments;
-    int[] durations;
-    int[] phases;
-    int start;
-    int end;
-    int form;
-    int ticks;
-    int phaseIndex;
-    int step;
-    int amplitude;
-    int max;
+    int segments; // Number of segments in the envelope
+    int[] durations; // Durations of each segment
+    int[] phases; // Target phase/value at the end of each segment
+    int start; // Starting value of the envelope
+    int end; // Ending value of the envelope
+    int form; // Shape of the envelope (0: Off, 1: Square, 2: Sine, 3: Triangle, 4: Noise)
+    int ticks; // Internal counter for envelope progression
+    int phaseIndex; // Current segment index
+    int step; // Value change per tick
+    int amplitude; // Current amplitude/value
+    int max; // Max ticks for current segment
 
     SoundEnvelope() {
         this.segments = 2;
         this.durations = new int[2];
         this.phases = new int[2];
-        this.durations[1] = 65535;
-        this.phases[1] = 65535;
+        this.durations[1] = 65535; // Default duration for the second segment
+        this.phases[1] = 65535;   // Default phase for the second segment
         this.form = 0; // Default form to 0 (off)
     }
 
+    // Decodes the envelope parameters from a Buffer.
     final void decode(Buffer buffer) {
         this.form = buffer.readUnsignedByte();
         this.start = buffer.readInt();
@@ -140,6 +163,7 @@ class SoundEnvelope {
         this.decodeSegments(buffer);
     }
 
+    // Decodes the envelope segments from a Buffer.
     final void decodeSegments(Buffer buffer) {
         this.segments = buffer.readUnsignedByte();
         this.durations = new int[this.segments];
@@ -149,9 +173,9 @@ class SoundEnvelope {
             this.durations[segment] = buffer.readUnsignedShort();
             this.phases[segment] = buffer.readUnsignedShort();
         }
-
     }
 
+    // Resets the envelope's internal state for a new synthesis cycle.
     final void reset() {
         this.ticks = 0;
         this.phaseIndex = 0;
@@ -160,6 +184,7 @@ class SoundEnvelope {
         this.max = 0;
     }
 
+    // Calculates the next step of the envelope.
     final int doStep(int period) {
         if (this.max >= this.ticks) {
             this.amplitude = this.phases[this.phaseIndex++] << 15;
@@ -178,6 +203,7 @@ class SoundEnvelope {
         return this.amplitude - this.step >> 15;
     }
 
+    // Encodes the envelope parameters into a Buffer.
     public void encode(Buffer buffer) {
         buffer.writeUnsignedByte(this.form);
         buffer.writeInt(this.start);
@@ -185,6 +211,7 @@ class SoundEnvelope {
         this.encodeSegments(buffer);
     }
 
+    // Encodes the envelope segments into a Buffer.
     final void encodeSegments(Buffer buffer) {
         buffer.writeUnsignedByte(this.segments);
         for (int segment = 0; segment < this.segments; ++segment) {
@@ -194,16 +221,17 @@ class SoundEnvelope {
     }
 }
 
+// Represents a sound filter, used for applying frequency response effects.
 class SoundFilter {
 
-    static float[][] minimizedCoefficients;
-    static int[][] coefficients;
-    static float forwardMinimizedCoefficientMultiplier;
-    static int forwardMultiplier;
-    int[] pairs;
-    int[][][] phases;
-    int[][][] magnitudes;
-    int[] unity;
+    static float[][] minimizedCoefficients; // Minimized filter coefficients
+    static int[][] coefficients; // Integer filter coefficients
+    static float forwardMinimizedCoefficientMultiplier; // Forward multiplier for filter
+    static int forwardMultiplier; // Integer forward multiplier
+    int[] pairs; // Number of pairs for each direction (input/output)
+    int[][][] phases; // Filter phases
+    int[][][] magnitudes; // Filter magnitudes
+    int[] unity; // Unity gain values for the filter
 
     static {
         minimizedCoefficients = new float[2][8];
@@ -212,26 +240,29 @@ class SoundFilter {
 
     SoundFilter() {
         this.pairs = new int[2];
-        this.phases = new int[2][2][4];
-        this.magnitudes = new int[2][2][4];
+        this.phases = new int[2][2][4]; // [direction][phaseType][pairIndex]
+        this.magnitudes = new int[2][2][4]; // [direction][magnitudeType][pairIndex]
         this.unity = new int[2];
     }
 
+    // Adapts the magnitude based on direction, index, and interpolation factor.
     float adaptMagnitude(int direction, int i, float f) {
         float alpha = (float) this.magnitudes[direction][0][i] + f * (float) (this.magnitudes[direction][1][i] - this.magnitudes[direction][0][i]);
-        alpha *= 0.0015258789F;
-        return 1.0F - (float) Math.pow(10.0D, -alpha / 20.0F);
+        alpha *= 0.0015258789F; // Scaling factor
+        return 1.0F - (float) Math.pow(10.0D, -alpha / 20.0F); // Convert to linear scale
     }
 
+    // Adapts the phase based on direction, index, and interpolation factor.
     float adaptPhase(int direction, int i, float f) {
         float alpha = (float) this.phases[direction][0][i] + f * (float) (this.phases[direction][1][i] - this.phases[direction][0][i]);
-        alpha *= 1.2207031E-4F;
-        return normalize(alpha);
+        alpha *= 1.2207031E-4F; // Scaling factor
+        return normalize(alpha); // Normalize the phase
     }
 
+    // Computes filter coefficients based on direction and interpolation factor.
     int compute(int direction, float f) {
         float magnitude;
-        if (direction == 0) {
+        if (direction == 0) { // Input direction
             magnitude = (float) this.unity[0] + (float) (this.unity[1] - this.unity[0]) * f;
             magnitude *= 0.0030517578F;
             forwardMinimizedCoefficientMultiplier = (float) Math.pow(0.1D, magnitude / 20.0F);
@@ -239,7 +270,7 @@ class SoundFilter {
         }
 
         if (this.pairs[direction] == 0) {
-            return 0;
+            return 0; // No pairs, no computation needed
         } else {
             magnitude = this.adaptMagnitude(direction, 0, f);
             minimizedCoefficients[direction][0] = -2.0F * magnitude * (float) Math.cos(this.adaptPhase(direction, 0, f));
@@ -280,15 +311,16 @@ class SoundFilter {
         }
     }
 
+    // Decodes the SoundFilter parameters from a Buffer.
     final void decode(Buffer buffer, SoundEnvelope envelope) {
         int count = buffer.readUnsignedByte();
-        this.pairs[0] = count >> 4;
-        this.pairs[1] = count & 15;
+        this.pairs[0] = count >> 4; // High nibble for pairs[0]
+        this.pairs[1] = count & 15; // Low nibble for pairs[1]
 
         if (count != 0) {
             this.unity[0] = buffer.readUnsignedShort();
             this.unity[1] = buffer.readUnsignedShort();
-            int migrated = buffer.readUnsignedByte();
+            int migrated = buffer.readUnsignedByte(); // Flag for migrated data
 
             int direction;
             int pair;
@@ -301,29 +333,33 @@ class SoundFilter {
 
             for (direction = 0; direction < 2; ++direction) {
                 for (pair = 0; pair < this.pairs[direction]; ++pair) {
-                    if ((migrated & (1 << (direction * 4 + pair))) != 0) {
+                    if ((migrated & (1 << (direction * 4 + pair))) != 0) { // Check migrated flag
                         this.phases[direction][1][pair] = buffer.readUnsignedShort();
                         this.magnitudes[direction][1][pair] = buffer.readUnsignedShort();
                     } else {
+                        // If not migrated, copy values from phase/magnitude 0
                         this.phases[direction][1][pair] = this.phases[direction][0][pair];
                         this.magnitudes[direction][1][pair] = this.magnitudes[direction][0][pair];
                     }
                 }
             }
 
+            // Only decode filter envelope segments if migrated data exists or unity values differ
             if (migrated != 0 || this.unity[1] != this.unity[0]) {
                 envelope.decodeSegments(buffer);
             }
         } else {
+            // If count is 0, reset unity values
             int[] unityArray = this.unity;
             this.unity[1] = 0;
             unityArray[0] = 0;
         }
     }
 
+    // Normalizes an alpha value for phase calculation.
     static float normalize(float alpha) {
         float f = 32.703197F * (float) Math.pow(2.0D, alpha);
-        return f * 3.1415927F / 11025.0F;
+        return f * 3.1415927F / 11025.0F; // Convert to radians per sample
     }
 
     /**
@@ -334,10 +370,10 @@ class SoundFilter {
      */
     public void encode(Buffer buffer, SoundEnvelope envelope) {
         // Clamp pairs values when writing to ensure compatibility with decoders
-        // that expect max 4 pairs.
+        // that expect max 4 pairs. This prevents writing out-of-bounds data if UI allows > 4.
         int clampedPairs0 = Math.min(this.pairs[0], 4);
         int clampedPairs1 = Math.min(this.pairs[1], 4);
-        int count = (clampedPairs0 << 4) | (clampedPairs1 & 0xF);
+        int count = (clampedPairs0 << 4) | (clampedPairs1 & 0xF); // Combine into a single byte
         buffer.writeUnsignedByte(count);
 
         if (count != 0) {
@@ -345,7 +381,7 @@ class SoundFilter {
             buffer.writeUnsignedShort(this.unity[1]);
 
             int migrated = getMigrated(clampedPairs0, clampedPairs1);
-            buffer.writeUnsignedByte(migrated);
+            buffer.writeUnsignedByte(migrated); // Write the migrated flag
 
             for (int direction = 0; direction < 2; ++direction) {
                 for (int pair = 0; pair < (direction == 0 ? clampedPairs0 : clampedPairs1); ++pair) {
@@ -356,26 +392,28 @@ class SoundFilter {
 
             for (int direction = 0; direction < 2; ++direction) {
                 for (int pair = 0; pair < (direction == 0 ? clampedPairs0 : clampedPairs1); ++pair) {
-                    if ((migrated & (1 << (direction * 4 + pair))) != 0) {
+                    if ((migrated & (1 << (direction * 4 + pair))) != 0) { // Only write phase[1]/mag[1] if migrated
                         buffer.writeUnsignedShort(this.phases[direction][1][pair]);
                         buffer.writeUnsignedShort(this.magnitudes[direction][1][pair]);
                     }
                 }
             }
 
+            // Only encode filter envelope segments if migrated data exists or unity values differ
             if (migrated != 0 || this.unity[1] != this.unity[0]) {
                 envelope.encodeSegments(buffer);
             }
         }
     }
 
+    // Determines the 'migrated' flag based on differences between phase/magnitude 0 and 1.
     private int getMigrated(int clampedPairs0, int clampedPairs1) {
         int migrated = 0;
         for (int direction = 0; direction < 2; ++direction) {
             for (int pair = 0; pair < (direction == 0 ? clampedPairs0 : clampedPairs1); ++pair) {
                 if (this.phases[direction][1][pair] != this.phases[direction][0][pair] ||
                         this.magnitudes[direction][1][pair] != this.magnitudes[direction][0][pair]) {
-                    migrated |= (1 << (direction * 4 + pair));
+                    migrated |= (1 << (direction * 4 + pair)); // Set bit if values differ
                 }
             }
         }
@@ -383,51 +421,52 @@ class SoundFilter {
     }
 }
 
-// Integrated SoundTone class
+// Represents a single sound tone, composed of various envelopes, oscillators, and a filter.
 class SoundTone {
 
-    static int[] toneSamples;
-    static int[] toneNoise;
-    static int[] toneSine;
-    static int[] tonePhases;
-    static int[] toneDelays;
-    static int[] toneVolumeSteps;
-    static int[] tonePitchSteps;
-    static int[] tonePitchBaseSteps;
-    SoundEnvelope pitch; // Always present
-    SoundEnvelope volume; // Always present
-    SoundEnvelope pitchModifier = null; // Optional
-    SoundEnvelope pitchModifierAmplitude = null; // Optional
-    SoundEnvelope volumeMultiplier = null; // Optional
-    SoundEnvelope volumeMultiplierAmplitude = null; // Optional
-    SoundEnvelope release = null; // Optional
-    SoundEnvelope attack = null; // Optional
-    int[] oscillatorVolume;
-    int[] oscillatorPitch;
-    int[] oscillatorDelays;
-    int delayTime;
-    int delayDecay;
-    SoundFilter filter; // Always present
-    SoundEnvelope filterEnvelope; // Always present
-    public int duration;
-    public int offset;
+    static int[] toneSamples; // Buffer for synthesized samples
+    static int[] toneNoise; // Noise lookup table
+    static int[] toneSine; // Sine wave lookup table
+    static int[] tonePhases; // Oscillator phases
+    static int[] toneDelays; // Oscillator delays
+    static int[] toneVolumeSteps; // Oscillator volume steps
+    static int[] tonePitchSteps; // Oscillator pitch steps
+    static int[] tonePitchBaseSteps; // Oscillator base pitch steps
+    SoundEnvelope pitch; // Pitch envelope (always present)
+    SoundEnvelope volume; // Volume envelope (always present)
+    SoundEnvelope pitchModifier = null; // Optional pitch modifier envelope
+    SoundEnvelope pitchModifierAmplitude = null; // Optional pitch modifier amplitude envelope
+    SoundEnvelope volumeMultiplier = null; // Optional volume multiplier envelope
+    SoundEnvelope volumeMultiplierAmplitude = null; // Optional volume multiplier amplitude envelope
+    SoundEnvelope release = null; // Optional release envelope
+    SoundEnvelope attack = null; // Optional attack envelope
+    int[] oscillatorVolume; // Volume for each of 5 oscillators
+    int[] oscillatorPitch; // Pitch for each of 5 oscillators
+    int[] oscillatorDelays; // Delay for each of 5 oscillators
+    int delayTime; // Global delay time
+    int delayDecay; // Global delay decay
+    SoundFilter filter; // Sound filter (always present)
+    SoundEnvelope filterEnvelope; // Filter envelope (always present)
+    public int duration; // Duration of the tone in milliseconds
+    public int offset; // Offset of the tone in milliseconds
 
     static {
+        // Initialize static lookup tables for noise and sine waves
         toneNoise = new int[32768];
         Random randomID = new Random(0L);
 
         int toneID;
         for (toneID = 0; toneID < 32768; ++toneID) {
-            toneNoise[toneID] = (randomID.nextInt() & 2) - 1;
+            toneNoise[toneID] = (randomID.nextInt() & 2) - 1; // Generates -1 or 1
         }
 
         toneSine = new int[32768];
 
         for (toneID = 0; toneID < 32768; ++toneID) {
-            toneSine[toneID] = (int) (Math.sin((double) toneID / 5215.1903D) * 16384.0D);
+            toneSine[toneID] = (int) (Math.sin((double) toneID / 5215.1903D) * 16384.0D); // Sine wave scaled
         }
 
-        toneSamples = new int[220500];
+        toneSamples = new int[220500]; // Max buffer size for samples (e.g., 10 seconds at 22050 Hz)
         tonePhases = new int[5];
         toneDelays = new int[5];
         toneVolumeSteps = new int[5];
@@ -436,6 +475,7 @@ class SoundTone {
     }
 
     public SoundTone() {
+        // Initialize oscillator arrays
         this.oscillatorVolume = new int[]{0, 0, 0, 0, 0};
         this.oscillatorPitch = new int[]{0, 0, 0, 0, 0};
         this.oscillatorDelays = new int[]{0, 0, 0, 0, 0};
@@ -451,16 +491,18 @@ class SoundTone {
         this.filterEnvelope = new SoundEnvelope();
     }
 
+    // Synthesizes the sound tone into an array of samples.
     public final int[] synthesize(int steps, int tones) {
-        ByteBufferUtils.clearIntArray(toneSamples, 0, steps);
+        ByteBufferUtils.clearIntArray(toneSamples, 0, steps); // Clear sample buffer
         if (tones >= 10) { // This condition seems arbitrary, should probably be based on duration
-            double duration = (double) steps / ((double) tones + 0.0D);
-            this.pitch.reset();
+            double duration = (double) steps / ((double) tones + 0.0D); // Calculate effective duration
+
+            this.pitch.reset(); // Reset all envelopes for synthesis
             this.volume.reset();
             int pitchModulationStep = 0;
             int pitchModulationBaseStep = 0;
             int pitchModulationPhase = 0;
-            if (this.pitchModifier != null) {
+            if (this.pitchModifier != null) { // If pitch modifier is enabled
                 this.pitchModifier.reset();
                 this.pitchModifierAmplitude.reset();
                 pitchModulationStep = (int) ((double) (this.pitchModifier.end - this.pitchModifier.start) * 32.768D / duration);
@@ -470,7 +512,7 @@ class SoundTone {
             int volumeModulationStep = 0;
             int volumeModulationBaseStep = 0;
             int volumeModulationPhase = 0;
-            if (this.volumeMultiplier != null) {
+            if (this.volumeMultiplier != null) { // If volume multiplier is enabled
                 this.volumeMultiplier.reset();
                 this.volumeMultiplierAmplitude.reset();
                 volumeModulationStep = (int) ((double) (this.volumeMultiplier.end - this.volumeMultiplier.start) * 32.768D / duration);
@@ -478,7 +520,7 @@ class SoundTone {
             }
 
             int step;
-            for (step = 0; step < 5; ++step) {
+            for (step = 0; step < 5; ++step) { // Initialize oscillators
                 if (this.oscillatorVolume[step] != 0) {
                     tonePhases[step] = 0;
                     toneDelays[step] = (int) ((double) this.oscillatorDelays[step] * duration);
@@ -493,7 +535,7 @@ class SoundTone {
             int volumeMultiplierChange;
             int volumeMultiplierAmplitudeChange;
             int[] samples;
-            for (step = 0; step < steps; ++step) {
+            for (step = 0; step < steps; ++step) { // Main synthesis loop
                 pitchChange = this.pitch.doStep(steps);
                 volumeChange = this.volume.doStep(steps);
                 if (this.pitchModifier != null) {
@@ -524,7 +566,7 @@ class SoundTone {
             }
 
             int volumeAttackAmplitudeChange;
-            if (this.release != null) {
+            if (this.release != null) { // Apply release/attack envelopes
                 this.release.reset();
                 this.attack.reset();
                 step = 0;
@@ -551,7 +593,7 @@ class SoundTone {
                 }
             }
 
-            if (this.delayTime > 0 && this.delayDecay > 0) {
+            if (this.delayTime > 0 && this.delayDecay > 0) { // Apply delay effect
                 step = (int) ((double) this.delayTime * duration);
 
                 for (pitchChange = step; pitchChange < steps; ++pitchChange) {
@@ -560,11 +602,12 @@ class SoundTone {
                 }
             }
 
+            // Apply filter if enabled (pairs[0] or pairs[1] > 0)
             if (this.filter.pairs[0] > 0 || this.filter.pairs[1] > 0) {
                 this.filterEnvelope.reset();
                 step = this.filterEnvelope.doStep(steps + 1);
-                pitchChange = this.filter.compute(0, (float) step / 65536.0F);
-                volumeChange = this.filter.compute(1, (float) step / 65536.0F);
+                pitchChange = this.filter.compute(0, (float) step / 65536.0F); // Compute input filter coefficients
+                volumeChange = this.filter.compute(1, (float) step / 65536.0F); // Compute output filter coefficients
                 if (steps >= pitchChange + volumeChange) {
                     volumeMultiplierChange = 0;
                     volumeMultiplierAmplitudeChange = Math.min(volumeChange, steps - pitchChange);
@@ -635,7 +678,7 @@ class SoundTone {
                 }
             }
 
-            for (step = 0; step < steps; ++step) {
+            for (step = 0; step < steps; ++step) { // Clamp samples to 16-bit range
                 if (toneSamples[step] < -32768) {
                     toneSamples[step] = -32768;
                 }
@@ -644,42 +687,43 @@ class SoundTone {
                     toneSamples[step] = 32767;
                 }
             }
-
         }
         return toneSamples;
     }
 
+    // Evaluates a wave based on form (square, sine, triangle, noise).
     final int evaluateWave(int var1, int var2, int var3) {
-        if (var3 == 1) {
+        if (var3 == 1) { // Square wave
             return (var1 & 32767) < 16384 ? var2 : -var2;
-        } else if (var3 == 2) {
+        } else if (var3 == 2) { // Sine wave
             return toneSine[var1 & 32767] * var2 >> 14;
-        } else if (var3 == 3) {
+        } else if (var3 == 3) { // Triangle wave
             return (var2 * (var1 & 32767) >> 14) - var2;
-        } else {
+        } else { // Noise (form 4) or off (form 0)
             return var3 == 4 ? var2 * toneNoise[var1 / 2607 & 32767] : 0;
         }
     }
 
+    // Decodes the SoundTone parameters from a Buffer.
     public final void decode(Buffer var1) {
         this.pitch = new SoundEnvelope();
-        this.pitch.decode(var1);
+        this.pitch.decode(var1); // Pitch envelope is always present
         this.volume = new SoundEnvelope();
-        this.volume.decode(var1);
+        this.volume.decode(var1); // Volume envelope is always present
 
-        int var2 = var1.readUnsignedByte();
+        int var2 = var1.readUnsignedByte(); // Read flag for pitch modifier
         if (var2 != 0) {
-            --var1.offset;
+            --var1.offset; // Rewind offset if flag is non-zero (it's the actual form byte)
             this.pitchModifier = new SoundEnvelope();
             this.pitchModifier.decode(var1);
             this.pitchModifierAmplitude = new SoundEnvelope();
             this.pitchModifierAmplitude.decode(var1);
         } else {
-            this.pitchModifier = null;
+            this.pitchModifier = null; // Set to null if not present
             this.pitchModifierAmplitude = null;
         }
 
-        var2 = var1.readUnsignedByte();
+        var2 = var1.readUnsignedByte(); // Read flag for volume multiplier
         if (var2 != 0) {
             --var1.offset;
             this.volumeMultiplier = new SoundEnvelope();
@@ -687,11 +731,11 @@ class SoundTone {
             this.volumeMultiplierAmplitude = new SoundEnvelope();
             this.volumeMultiplierAmplitude.decode(var1);
         } else {
-            this.volumeMultiplier = null;
+            this.volumeMultiplier = null; // Set to null if not present
             this.volumeMultiplierAmplitude = null;
         }
 
-        var2 = var1.readUnsignedByte();
+        var2 = var1.readUnsignedByte(); // Read flag for release/attack
         if (var2 != 0) {
             --var1.offset;
             this.release = new SoundEnvelope();
@@ -699,13 +743,14 @@ class SoundTone {
             this.attack = new SoundEnvelope();
             this.attack.decode(var1);
         } else {
-            this.release = null;
+            this.release = null; // Set to null if not present
             this.attack = null;
         }
 
+        // Decode oscillator data (up to 5 oscillators)
         for (int var3 = 0; var3 < 5; ++var3) {
-            int var4 = var1.readUShortSmart();
-            if (var4 == 0) {
+            int var4 = var1.readUShortSmart(); // Read oscillator volume (or terminator)
+            if (var4 == 0) { // If 0, it's a terminator, so remaining oscillators are off
                 for (int i = var3; i < 5; i++) {
                     this.oscillatorVolume[i] = 0;
                     this.oscillatorPitch[i] = 0;
@@ -724,15 +769,17 @@ class SoundTone {
         this.offset = var1.readUnsignedShort();
         this.filter = new SoundFilter(); // Always instantiate filter
         this.filterEnvelope = new SoundEnvelope(); // Always instantiate filterEnvelope
-        this.filter.decode(var1, this.filterEnvelope);
+        this.filter.decode(var1, this.filterEnvelope); // Decode filter parameters
     }
 
+    // Encodes the SoundTone parameters into a Buffer.
     public void encode(Buffer buffer) {
-        this.pitch.encode(buffer); // Always present, never null
-        this.volume.encode(buffer); // Always present, never null
+        this.pitch.encode(buffer); // Pitch envelope is always present
+        this.volume.encode(buffer); // Volume envelope is always present
 
         // Pitch Modifier and Pitch Modifier Amplitude
-        // Only encode if the object exists AND its form is non-zero
+        // If the object exists AND its form is non-zero, encode it.
+        // Otherwise, write a 0 flag byte.
         if (this.pitchModifier != null && this.pitchModifier.form != 0) {
             this.pitchModifier.encode(buffer);
             this.pitchModifierAmplitude.encode(buffer);
@@ -759,6 +806,8 @@ class SoundTone {
         // Oscillator Data (now limited to 5 as per original SoundTone)
         boolean terminatorWritten = false; // Flag to indicate if a 0 terminator has been written
         for (int i = 0; i < 5; ++i) { // Loop only 5 times for the 5 oscillators
+            // Write oscillator data if any of its parameters are non-zero.
+            // This is crucial for matching the decoding logic.
             if (this.oscillatorVolume[i] != 0 || this.oscillatorPitch[i] != 0 || this.oscillatorDelays[i] != 0) {
                 buffer.writeUShortSmart(this.oscillatorVolume[i]); // Write volume
                 buffer.writeShortSmart(this.oscillatorPitch[i]); // Write pitch
@@ -774,34 +823,38 @@ class SoundTone {
             buffer.writeUShortSmart(0);
         }
 
-
-        buffer.writeUShortSmart(this.delayTime); // Changed to UShortSmart as per provided SoundTone.java
-        buffer.writeUShortSmart(this.delayDecay); // Changed to UShortSmart as per provided SoundTone.java
+        // Corrected to use writeUShortSmart for consistency with decode
+        buffer.writeUShortSmart(this.delayTime);
+        buffer.writeUShortSmart(this.delayDecay);
         buffer.writeUnsignedShort(this.duration);
         buffer.writeUnsignedShort(this.offset);
 
-        // Filter and Filter Envelope
+        // Filter and Filter Envelope (always present)
         this.filter.encode(buffer, this.filterEnvelope);
     }
 }
 
-// Integrated SoundEffect class
+// Represents a complete sound effect, composed of up to 10 sound tones.
 class SoundEffect {
 
-    SoundTone[] soundTones;
-    int start;
-    int end;
-    byte[] rawAudioData;
+    SoundTone[] soundTones; // Array of up to 10 sound tones
+    int start; // Start time of the effect (unused in current synthesis)
+    int end; // End time of the effect (unused in current synthesis)
 
+    // Constructor for decoding a SoundEffect from a Buffer.
     public SoundEffect(Buffer var1) {
         this.soundTones = new SoundTone[10];
 
         for (int var2 = 0; var2 < 10; ++var2) {
-            int var3 = var1.readUnsignedByte();
-            if (var3 != 0) {
-                --var1.offset;
+            // Read a byte to determine if a SoundTone exists at this index.
+            // If it's 0, no tone exists. If non-zero, it's the first byte of the tone.
+            int toneExistsFlag = var1.readUnsignedByte();
+            if (toneExistsFlag != 0) {
+                --var1.offset; // Rewind the offset as the flag was actually the first byte of the tone.
                 this.soundTones[var2] = new SoundTone();
-                this.soundTones[var2].decode(var1);
+                this.soundTones[var2].decode(var1); // Decode the tone.
+            } else {
+                this.soundTones[var2] = null; // Set to null if no tone exists at this index.
             }
         }
 
@@ -809,150 +862,167 @@ class SoundEffect {
         this.end = var1.readUnsignedShort();
     }
 
-    // Default constructor for creating a new SoundEffect
+    // Default constructor for creating a new (empty) SoundEffect.
     public SoundEffect() {
-        this.soundTones = new SoundTone[10];
+        this.soundTones = new SoundTone[10]; // Initialize with null tones
         this.start = 0;
         this.end = 0;
     }
 
+    // Mixes all active sound tones into a single byte array of audio data (8-bit).
     final byte[] mix() {
         int var1 = 0;
 
-        int var2;
-        for (var2 = 0; var2 < 10; ++var2) {
+        // Determine the total duration needed for mixing.
+        for (int var2 = 0; var2 < 10; ++var2) {
             if (this.soundTones[var2] != null && this.soundTones[var2].duration + this.soundTones[var2].offset > var1) {
                 var1 = this.soundTones[var2].duration + this.soundTones[var2].offset;
             }
         }
 
         if (var1 == 0) {
-            return new byte[0];
+            return new byte[0]; // Return empty array if no active tones.
         } else {
-            var2 = var1 * 22050 / 1000;
-            byte[] var3 = new byte[var2];
+            int var2 = var1 * 22050 / 1000; // Calculate total samples based on duration.
+            byte[] var3 = new byte[var2]; // Buffer for mixed 8-bit audio.
 
             for (int var4 = 0; var4 < 10; ++var4) {
                 if (this.soundTones[var4] != null) {
-                    int var5 = this.soundTones[var4].duration * 22050 / 1000;
-                    int var6 = this.soundTones[var4].offset * 22050 / 1000;
+                    int var5 = this.soundTones[var4].duration * 22050 / 1000; // Samples for this tone.
+                    int var6 = this.soundTones[var4].offset * 22050 / 1000; // Offset for this tone.
+                    // Synthesize the tone (produces 16-bit int samples).
                     int[] var7 = this.soundTones[var4].synthesize(var5, this.soundTones[var4].duration);
 
                     for (int var8 = 0; var8 < var5; ++var8) {
-                        int var9 = (var7[var8] >> 8) + var3[var8 + var6];
-                        if ((var9 + 128 & -256) != 0) {
+                        // Convert 16-bit sample to 8-bit and mix into the buffer.
+                        int var9 = (var7[var8] >> 8) + var3[var8 + var6]; // Take high byte and add to existing.
+                        if ((var9 + 128 & -256) != 0) { // Clamp to 8-bit signed range (-128 to 127).
                             var9 = var9 >> 31 ^ 127;
                         }
-
                         var3[var8 + var6] = (byte) var9;
                     }
                 }
             }
-
             return var3;
         }
     }
 
+    // Encodes the entire SoundEffect into a byte array (JagFX format).
     public byte[] encode() {
         Buffer buffer = new Buffer();
         for (int i = 0; i < 10; ++i) {
             if (this.soundTones[i] != null) {
+                // If tone exists, encode it. The SoundTone.encode() will write its form byte first.
                 this.soundTones[i].encode(buffer);
             } else {
+                // If tone is null, write a 0 flag byte to indicate its absence.
                 buffer.writeUnsignedByte(0);
             }
         }
         buffer.writeUnsignedShort(this.start);
         buffer.writeUnsignedShort(this.end);
-        return buffer.array;
+        return buffer.bos.toByteArray(); // Get the byte array from the ByteArrayOutputStream.
     }
 }
 
+// Main application class for the Sound Effect Editor.
 public class SoundEffectEditor extends JFrame {
 
-    private static final Color BG_DEFAULT_FRAME = new Color(30, 30, 30); // Dark background
-    private static final Color PANEL_BG = new Color(45, 45, 45); // Slightly lighter dark for panels
-    private static final Color BORDER_COLOR = new Color(60, 60, 60); // Dark grey for borders
-    private static final Color TEXT_COLOR_LIGHT = new Color(220, 220, 220); // Light text for contrast
-    private static final Color HIGHLIGHT_COLOR_GREEN = new Color(0, 255, 0); // Vibrant green for highlights
-    private static final Color BUTTON_BG = new Color(70, 70, 70); // Dark button grey
-    private static final Color BUTTON_BLUE = new Color(50, 150, 250); // Brighter blue for actions
-    private static final Color BUTTON_RED = new Color(200, 50, 50); // Red for destructive actions
-    private static final Color BUTTON_GREEN = new Color(50, 200, 50); // Green for positive actions
-    private static final Color SLIDER_THUMB_COLOR = HIGHLIGHT_COLOR_GREEN; // Vibrant green thumb
-    private static final Color SLIDER_TRACK_COLOR = new Color(90, 90, 90); // Darker track color
-    private static final Color GRAPH_BG = Color.BLACK; // Black background for graphs
-    private static final Color GRAPH_GRID = new Color(60, 60, 60); // Dark grey grid
-    private static final Color GRAPH_LINE = HIGHLIGHT_COLOR_GREEN; // Vibrant green graph line
-    private static final Color WAVEFORM_BG = Color.BLACK; // Black background for waveform
-    private static final Color WAVEFORM_COLOR = HIGHLIGHT_COLOR_GREEN; // Vibrant green waveform color
+    // UI Colors
+    private static final Color BG_DEFAULT_FRAME = new Color(30, 30, 30);
+    private static final Color PANEL_BG = new Color(45, 45, 45);
+    private static final Color BORDER_COLOR = new Color(60, 60, 60);
+    private static final Color TEXT_COLOR_LIGHT = new Color(220, 220, 220);
+    private static final Color HIGHLIGHT_COLOR_GREEN = new Color(0, 255, 0);
+    private static final Color BUTTON_BG = new Color(70, 70, 70);
+    private static final Color BUTTON_BLUE = new Color(50, 150, 250);
+    private static final Color BUTTON_RED = new Color(200, 50, 50);
+    private static final Color BUTTON_GREEN = new Color(50, 200, 50);
+    private static final Color SLIDER_THUMB_COLOR = HIGHLIGHT_COLOR_GREEN;
+    private static final Color SLIDER_TRACK_COLOR = new Color(90, 90, 90);
+    private static final Color GRAPH_BG = Color.BLACK;
+    private static final Color GRAPH_GRID = new Color(60, 60, 60);
+    private static final Color GRAPH_LINE = HIGHLIGHT_COLOR_GREEN;
+    private static final Color WAVEFORM_BG = Color.BLACK;
+    private static final Color WAVEFORM_COLOR = HIGHLIGHT_COLOR_GREEN;
 
-    private final List<SoundTone> currentSoundTones;
-    private final JList<String> soundToneList;
-    private final DefaultListModel<String> soundToneListModel;
-    private final JPanel soundToneParametersPanel;
-    private final JPanel envelopeAndFilterPanel;
+    private final List<SoundTone> currentSoundTones; // List of SoundTone objects in the current effect
+    private final JList<String> soundToneList; // UI list for selecting tones
+    private final DefaultListModel<String> soundToneListModel; // Model for the JList
+    private final JPanel soundToneParametersPanel; // Panel for general tone parameters
+    private final JPanel envelopeAndFilterPanel; // Panel for envelopes and filters
 
+    // Sliders for main tone parameters
     private final JSlider durationSlider;
     private final JSlider offsetSlider;
     private final JSlider delayTimeSlider;
     private final JSlider delayDecaySlider;
 
+    // Sliders for selected oscillator parameters
     private final JSlider oscVolumeSlider;
     private final JSlider oscPitchSlider;
     private final JSlider oscDelaySlider;
 
+    // UI components for Pitch Envelope
     private final JComboBox<String> pitchEnvelopeFormComboBox;
     private final JTextField pitchEnvelopeStartField;
     private final JTextField pitchEnvelopeEndField;
 
+    // UI components for Volume Envelope
     private final JComboBox<String> volumeEnvelopeFormComboBox;
     private final JTextField volumeEnvelopeStartField;
     private final JTextField volumeEnvelopeEndField;
 
+    // UI components for optional Pitch Modifier Envelope
     private final JCheckBox pitchModifierEnabledCheckbox;
     private final JComboBox<String> pitchModifierFormComboBox;
     private final JTextField pitchModifierStartField;
     private final JTextField pitchModifierEndField;
 
+    // UI components for optional Pitch Modifier Amplitude Envelope
     private final JCheckBox pitchModifierAmplitudeEnabledCheckbox;
     private final JComboBox<String> pitchModifierAmplitudeFormComboBox;
     private final JTextField pitchModifierAmplitudeStartField;
     private final JTextField pitchModifierAmplitudeEndField;
 
+    // UI components for optional Volume Multiplier Envelope
     private final JCheckBox volumeMultiplierEnabledCheckbox;
     private final JComboBox<String> volumeMultiplierFormComboBox;
     private final JTextField volumeMultiplierStartField;
     private final JTextField volumeMultiplierEndField;
 
+    // UI components for optional Volume Multiplier Amplitude Envelope
     private final JCheckBox volumeMultiplierAmplitudeEnabledCheckbox;
     private final JComboBox<String> volumeMultiplierAmplitudeFormComboBox;
     private final JTextField volumeMultiplierAmplitudeStartField;
     private final JTextField volumeMultiplierAmplitudeEndField;
 
+    // UI components for optional Release Envelope
     private final JCheckBox releaseEnabledCheckbox;
     private final JComboBox<String> releaseFormComboBox;
     private final JTextField releaseStartField;
     private final JTextField releaseEndField;
 
+    // UI components for optional Attack Envelope
     private final JCheckBox attackEnabledCheckbox;
     private final JComboBox<String> attackFormComboBox;
     private final JTextField attackStartField;
     private final JTextField attackEndField;
 
+    // UI components for Sound Filter
     private final JCheckBox filterEnabledCheckbox;
     private final JSlider filterUnity0Slider;
     private final JSlider filterUnity1Slider;
-
     private final JSlider filterPairs0Slider; // For pairs[0]
     private final JSlider filterPairs1Slider; // For pairs[1]
     private final JPanel filterPairsPanel; // Panel to hold dynamic filter pair controls
 
-    private Clip audioClip;
+    private Clip audioClip; // For audio playback
     private final ListSelectionListener listSelectionListener; // Store the ListSelectionListener
 
-    private SoundTone currentlyEditedTone;
+    private SoundTone currentlyEditedTone; // The SoundTone currently being edited in the UI
 
+    // Graph panels for envelopes
     private EnvelopeGraphPanel pitchEnvelopeGraphPanel;
     private EnvelopeGraphPanel volumeEnvelopeGraphPanel;
     private EnvelopeGraphPanel pitchModifierEnvelopeGraphPanel;
@@ -962,21 +1032,21 @@ public class SoundEffectEditor extends JFrame {
     private EnvelopeGraphPanel releaseEnvelopeGraphPanel;
     private EnvelopeGraphPanel attackEnvelopeGraphPanel;
 
-    private final WaveformDisplayPanel waveformDisplayPanel;
-    private FilterGraphPanel filterGraphPanel;
+    private final WaveformDisplayPanel waveformDisplayPanel; // Panel for waveform visualization
+    private FilterGraphPanel filterGraphPanel; // Panel for filter frequency response visualization
 
-    private final Timer debounceTimer;
+    private final Timer debounceTimer; // Timer to debounce UI updates for performance
 
-    private final JComboBox<String> outputBitDepthComboBox;
-    private int outputBitDepth = 8;
+    private final JComboBox<String> outputBitDepthComboBox; // Combo box for selecting output bit depth
+    private int outputBitDepth = 8; // Current output bit depth (default 8-bit)
 
-    private final JList<String> oscillatorJList;
-    private final int MAX_OSCILLATORS = 5;
-    private int currentlySelectedOscillatorIndex = 0;
+    private final JList<String> oscillatorJList; // List for selecting individual oscillators
+    private final int MAX_OSCILLATORS = 5; // Maximum number of oscillators per tone
+    private int currentlySelectedOscillatorIndex = 0; // Currently selected oscillator index
 
 
     public SoundEffectEditor() {
-        setTitle("JagFX Editor: RuneScape Sound Effects v2");
+        setTitle("JagFX Editor: RuneScape Sound Effects v3");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1400, 900);
         setLocationRelativeTo(null);
@@ -984,25 +1054,28 @@ public class SoundEffectEditor extends JFrame {
         getContentPane().setBackground(BG_DEFAULT_FRAME);
 
         currentSoundTones = new ArrayList<>();
-        currentSoundTones.add(new SoundTone());
+        currentSoundTones.add(new SoundTone()); // Start with one default tone
 
+        // Debounce timer to prevent excessive UI updates during slider/text changes
         int DEBOUNCE_DELAY_MS = 100;
         debounceTimer = new Timer(DEBOUNCE_DELAY_MS, (ActionEvent _) -> {
             if (currentlyEditedTone != null) {
                 updateWaveformDisplay();
                 pitchEnvelopeGraphPanel.repaint();
                 volumeEnvelopeGraphPanel.repaint();
-                pitchModifierEnvelopeGraphPanel.repaint();
-                pitchModifierAmplitudeEnvelopeGraphPanel.repaint();
-                volumeMultiplierEnvelopeGraphPanel.repaint();
-                volumeMultiplierAmplitudeEnvelopeGraphPanel.repaint();
-                releaseEnvelopeGraphPanel.repaint();
-                attackEnvelopeGraphPanel.repaint();
+                // Repaint optional envelope graphs only if their corresponding objects exist
+                if (pitchModifierEnvelopeGraphPanel != null) pitchModifierEnvelopeGraphPanel.repaint();
+                if (pitchModifierAmplitudeEnvelopeGraphPanel != null) pitchModifierAmplitudeEnvelopeGraphPanel.repaint();
+                if (volumeMultiplierEnvelopeGraphPanel != null) volumeMultiplierEnvelopeGraphPanel.repaint();
+                if (volumeMultiplierAmplitudeEnvelopeGraphPanel != null) volumeMultiplierAmplitudeEnvelopeGraphPanel.repaint();
+                if (releaseEnvelopeGraphPanel != null) releaseEnvelopeGraphPanel.repaint();
+                if (attackEnvelopeGraphPanel != null) attackEnvelopeGraphPanel.repaint();
                 filterGraphPanel.repaint();
             }
         });
-        debounceTimer.setRepeats(false);
+        debounceTimer.setRepeats(false); // Only fire once per delay
 
+        // --- Top Bar Controls ---
         JPanel topBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
         topBar.setBackground(PANEL_BG);
         topBar.setBorder(new EmptyBorder(5, 10, 5, 10));
@@ -1084,7 +1157,7 @@ public class SoundEffectEditor extends JFrame {
         soundToneList.setBorder(BorderFactory.createEmptyBorder());
         listSelectionListener = e -> {
             if (!e.getValueIsAdjusting()) {
-                updateSoundToneEditorPanel();
+                updateSoundToneEditorPanel(); // Update UI when tone selection changes
             }
         };
         soundToneList.addListSelectionListener(listSelectionListener);
@@ -1116,6 +1189,7 @@ public class SoundEffectEditor extends JFrame {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.WEST;
 
+        // Duration Slider
         gbc.gridx = 0;
         gbc.gridy = 0;
         toneParamsContent.add(createLabel("Duration (ms):"), gbc);
@@ -1126,6 +1200,7 @@ public class SoundEffectEditor extends JFrame {
         toneParamsContent.add(durationSlider, gbc);
         gbc.weightx = 0;
 
+        // Offset Slider
         gbc.gridx = 0;
         gbc.gridy = 1;
         toneParamsContent.add(createLabel("Offset (ms):"), gbc);
@@ -1136,6 +1211,7 @@ public class SoundEffectEditor extends JFrame {
         toneParamsContent.add(offsetSlider, gbc);
         gbc.weightx = 0;
 
+        // Delay Time Slider
         gbc.gridx = 0;
         gbc.gridy = 2;
         toneParamsContent.add(createLabel("Delay Time (ms):"), gbc);
@@ -1146,6 +1222,7 @@ public class SoundEffectEditor extends JFrame {
         toneParamsContent.add(delayTimeSlider, gbc);
         gbc.weightx = 0;
 
+        // Delay Decay Slider
         gbc.gridx = 0;
         gbc.gridy = 3;
         toneParamsContent.add(createLabel("Delay Decay (%):"), gbc);
@@ -1156,11 +1233,13 @@ public class SoundEffectEditor extends JFrame {
         toneParamsContent.add(delayDecaySlider, gbc);
         gbc.weightx = 0;
 
+        // Oscillator Parameters Section Title
         gbc.gridy = 4;
         gbc.gridwidth = 2;
         toneParamsContent.add(createTitleLabel("Oscillator Parameters"), gbc);
         gbc.gridwidth = 1;
 
+        // Oscillator List
         DefaultListModel<String> oscillatorListModel = new DefaultListModel<>();
         for (int i = 0; i < MAX_OSCILLATORS; i++) {
             oscillatorListModel.addElement("Oscillator " + (i + 1));
@@ -1181,7 +1260,7 @@ public class SoundEffectEditor extends JFrame {
                 int selectedIndex = oscillatorJList.getSelectedIndex();
                 if (selectedIndex != -1) {
                     currentlySelectedOscillatorIndex = selectedIndex;
-                    updateOscillatorParametersPanel();
+                    updateOscillatorParametersPanel(); // Update UI for selected oscillator
                 }
             }
         });
@@ -1197,6 +1276,7 @@ public class SoundEffectEditor extends JFrame {
         toneParamsContent.add(oscillatorListPanel, gbc);
         gbc.gridheight = 1;
 
+        // Current Oscillator Parameters Panel
         JPanel currentOscillatorParametersPanel = new JPanel(new GridBagLayout());
         currentOscillatorParametersPanel.setBackground(PANEL_BG);
         currentOscillatorParametersPanel.setBorder(BorderFactory.createTitledBorder(new LineBorder(BORDER_COLOR), "Selected Oscillator"));
@@ -1211,8 +1291,8 @@ public class SoundEffectEditor extends JFrame {
         oscGbc.gridx = 1;
         oscGbc.gridy = 0;
         oscGbc.weightx = 1.0;
-        oscVolumeSlider = createSlider(0, 65535, 0);
-        currentOscillatorParametersPanel.add(oscVolumeSlider, oscGbc); // Changed max to 65535
+        oscVolumeSlider = createSlider(0, 65535, 0); // Max volume 65535
+        currentOscillatorParametersPanel.add(oscVolumeSlider, oscGbc);
         oscGbc.weightx = 0;
 
         oscGbc.gridx = 0;
@@ -1231,8 +1311,8 @@ public class SoundEffectEditor extends JFrame {
         oscGbc.gridx = 1;
         oscGbc.gridy = 2;
         oscGbc.weightx = 1.0;
-        oscDelaySlider = createSlider(0, 9, 0);
-        currentOscillatorParametersPanel.add(oscDelaySlider, oscGbc); // Delay type 0-9
+        oscDelaySlider = createSlider(0, 9, 0); // Delay type 0-9
+        currentOscillatorParametersPanel.add(oscDelaySlider, oscGbc);
         oscGbc.weightx = 0;
 
         gbc.gridx = 1;
@@ -1256,23 +1336,23 @@ public class SoundEffectEditor extends JFrame {
                 new LineBorder(BORDER_COLOR, 1)
         ));
 
-        // Pitch Envelope
+        // Pitch Envelope (always present)
         envelopeAndFilterPanel.add(createEnvelopePanel("Pitch Envelope",
-                pitchEnvelopeFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}), // Added "Off"
+                pitchEnvelopeFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 pitchEnvelopeStartField = createTextField("0"),
                 pitchEnvelopeEndField = createTextField("0"),
                 null // No checkbox for main envelopes
         ));
 
-        // Volume Envelope
+        // Volume Envelope (always present)
         envelopeAndFilterPanel.add(createEnvelopePanel("Volume Envelope",
-                volumeEnvelopeFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}), // Added "Off"
+                volumeEnvelopeFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 volumeEnvelopeStartField = createTextField("0"),
                 volumeEnvelopeEndField = createTextField("0"),
                 null // No checkbox for main envelopes
         ));
 
-        // NEW: Pitch Modifier Envelope
+        // Optional Pitch Modifier Envelope
         envelopeAndFilterPanel.add(createEnvelopePanel("Pitch Modifier Envelope",
                 pitchModifierFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 pitchModifierStartField = createTextField("0"),
@@ -1280,7 +1360,7 @@ public class SoundEffectEditor extends JFrame {
                 pitchModifierEnabledCheckbox = new JCheckBox("Enable Pitch Modifier")
         ));
 
-        // NEW: Pitch Modifier Amplitude Envelope
+        // Optional Pitch Modifier Amplitude Envelope
         envelopeAndFilterPanel.add(createEnvelopePanel("Pitch Modifier Amplitude Envelope",
                 pitchModifierAmplitudeFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 pitchModifierAmplitudeStartField = createTextField("0"),
@@ -1288,7 +1368,7 @@ public class SoundEffectEditor extends JFrame {
                 pitchModifierAmplitudeEnabledCheckbox = new JCheckBox("Enable Pitch Mod Amplitude")
         ));
 
-        // NEW: Volume Multiplier Envelope
+        // Optional Volume Multiplier Envelope
         envelopeAndFilterPanel.add(createEnvelopePanel("Volume Multiplier Envelope",
                 volumeMultiplierFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 volumeMultiplierStartField = createTextField("0"),
@@ -1296,7 +1376,7 @@ public class SoundEffectEditor extends JFrame {
                 volumeMultiplierEnabledCheckbox = new JCheckBox("Enable Volume Multiplier")
         ));
 
-        // NEW: Volume Multiplier Amplitude Envelope
+        // Optional Volume Multiplier Amplitude Envelope
         envelopeAndFilterPanel.add(createEnvelopePanel("Volume Multiplier Amplitude Envelope",
                 volumeMultiplierAmplitudeFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 volumeMultiplierAmplitudeStartField = createTextField("0"),
@@ -1304,7 +1384,7 @@ public class SoundEffectEditor extends JFrame {
                 volumeMultiplierAmplitudeEnabledCheckbox = new JCheckBox("Enable Volume Mul Amplitude")
         ));
 
-        // NEW: Release Envelope
+        // Optional Release Envelope
         envelopeAndFilterPanel.add(createEnvelopePanel("Release Envelope",
                 releaseFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 releaseStartField = createTextField("0"),
@@ -1312,7 +1392,7 @@ public class SoundEffectEditor extends JFrame {
                 releaseEnabledCheckbox = new JCheckBox("Enable Release")
         ));
 
-        // NEW: Attack Envelope
+        // Optional Attack Envelope
         envelopeAndFilterPanel.add(createEnvelopePanel("Attack Envelope",
                 attackFormComboBox = createComboBox(new String[]{"Square", "Sine", "Triangle", "Noise", "Off"}),
                 attackStartField = createTextField("0"),
@@ -1321,12 +1401,13 @@ public class SoundEffectEditor extends JFrame {
         ));
 
 
-        // Sound Filter
+        // Sound Filter Panel
         JPanel filterPanel = new JPanel(new GridBagLayout());
         filterPanel.setBackground(PANEL_BG);
         filterPanel.setBorder(BorderFactory.createTitledBorder(new LineBorder(BORDER_COLOR), "Sound Filter"));
         int filterRow = 0;
 
+        // Filter Enabled Checkbox
         gbc.gridx = 0;
         gbc.gridy = filterRow;
         filterEnabledCheckbox = new JCheckBox("Enable Filter");
@@ -1338,6 +1419,7 @@ public class SoundEffectEditor extends JFrame {
         gbc.gridwidth = 1;
         filterRow++;
 
+        // Filter Unity 0 Slider
         gbc.gridx = 0;
         gbc.gridy = filterRow;
         filterPanel.add(createLabel("Unity 0:"), gbc);
@@ -1346,6 +1428,7 @@ public class SoundEffectEditor extends JFrame {
         filterUnity0Slider = createSlider(0, 65535, 0);
         filterPanel.add(filterUnity0Slider, gbc);
 
+        // Filter Unity 1 Slider
         gbc.gridx = 0;
         gbc.gridy = filterRow;
         filterPanel.add(createLabel("Unity 1:"), gbc);
@@ -1354,29 +1437,31 @@ public class SoundEffectEditor extends JFrame {
         filterUnity1Slider = createSlider(0, 65535, 0);
         filterPanel.add(filterUnity1Slider, gbc);
 
-        // NEW: Filter Pairs
+        // Filter Pairs 0 Slider
         gbc.gridx = 0;
         gbc.gridy = filterRow;
         filterPanel.add(createLabel("Pairs 0:"), gbc);
         gbc.gridx = 1;
         gbc.gridy = filterRow++;
-        filterPairs0Slider = createSlider(0, 4, 0);
-        filterPanel.add(filterPairs0Slider, gbc); // Max 4 pairs
-        filterPairs0Slider.setMajorTickSpacing(1); // Set major tick spacing to 1
-        filterPairs0Slider.setMinorTickSpacing(1); // Set minor tick spacing to 1
-        filterPairs0Slider.setPaintLabels(true); // Show labels for ticks
+        filterPairs0Slider = createSlider(0, 4, 0); // Max 4 pairs
+        filterPanel.add(filterPairs0Slider, gbc);
+        filterPairs0Slider.setMajorTickSpacing(1);
+        filterPairs0Slider.setMinorTickSpacing(1);
+        filterPairs0Slider.setPaintLabels(true);
 
+        // Filter Pairs 1 Slider
         gbc.gridx = 0;
         gbc.gridy = filterRow;
         filterPanel.add(createLabel("Pairs 1:"), gbc);
         gbc.gridx = 1;
         gbc.gridy = filterRow++;
-        filterPairs1Slider = createSlider(0, 4, 0);
-        filterPanel.add(filterPairs1Slider, gbc); // Max 4 pairs
-        filterPairs1Slider.setMajorTickSpacing(1); // Set major tick spacing to 1
-        filterPairs1Slider.setMinorTickSpacing(1); // Set minor tick spacing to 1
-        filterPairs1Slider.setPaintLabels(true); // Show labels for ticks
+        filterPairs1Slider = createSlider(0, 4, 0); // Max 4 pairs
+        filterPanel.add(filterPairs1Slider, gbc);
+        filterPairs1Slider.setMajorTickSpacing(1);
+        filterPairs1Slider.setMinorTickSpacing(1);
+        filterPairs1Slider.setPaintLabels(true);
 
+        // Panel for dynamic filter pair coefficient controls
         filterPairsPanel = new JPanel(new GridBagLayout());
         filterPairsPanel.setBackground(PANEL_BG);
         filterPairsPanel.setBorder(BorderFactory.createTitledBorder(new LineBorder(BORDER_COLOR), "Filter Coefficients"));
@@ -1398,7 +1483,8 @@ public class SoundEffectEditor extends JFrame {
         // Right Panel: Graphs and Waveform
         JPanel rightGraphPanel = new JPanel();
         rightGraphPanel.setBackground(BG_DEFAULT_FRAME);
-        rightGraphPanel.setLayout(new GridLayout(4, 2, 5, 5)); // 4 rows, 2 columns for graphs (more space)
+        // Changed to 5 rows, 2 columns to accommodate all graphs and waveform
+        rightGraphPanel.setLayout(new GridLayout(5, 2, 5, 5));
         rightGraphPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
 
         // Initialize graph panels
@@ -1414,6 +1500,7 @@ public class SoundEffectEditor extends JFrame {
         waveformDisplayPanel = new WaveformDisplayPanel("Waveform Output", WAVEFORM_BG, WAVEFORM_COLOR);
         filterGraphPanel = new FilterGraphPanel("Filter Frequency Response", GRAPH_BG, GRAPH_GRID, GRAPH_LINE);
 
+        // Add graphs to the panel
         rightGraphPanel.add(pitchEnvelopeGraphPanel);
         rightGraphPanel.add(volumeEnvelopeGraphPanel);
         rightGraphPanel.add(pitchModifierEnvelopeGraphPanel);
@@ -1444,6 +1531,7 @@ public class SoundEffectEditor extends JFrame {
         setVisible(true);
     }
 
+    // Helper method to create a JLabel with consistent styling.
     private JLabel createLabel(String text) {
         JLabel label = new JLabel(text);
         label.setForeground(TEXT_COLOR_LIGHT);
@@ -1451,6 +1539,7 @@ public class SoundEffectEditor extends JFrame {
         return label;
     }
 
+    // Helper method to create a title JLabel with consistent styling.
     private JLabel createTitleLabel(String text) {
         JLabel label = new JLabel(text);
         label.setForeground(HIGHLIGHT_COLOR_GREEN);
@@ -1459,6 +1548,7 @@ public class SoundEffectEditor extends JFrame {
         return label;
     }
 
+    // Helper method to create a JButton with consistent styling.
     private JButton createButton(String text, Color bgColor) {
         JButton button = new JButton(text);
         button.setBackground(bgColor);
@@ -1478,6 +1568,7 @@ public class SoundEffectEditor extends JFrame {
         return button;
     }
 
+    // Helper method to create a JComboBox with consistent styling.
     private JComboBox<String> createComboBox(String[] items) {
         JComboBox<String> comboBox = new JComboBox<>(items);
         comboBox.setBackground(BUTTON_BG);
@@ -1497,6 +1588,7 @@ public class SoundEffectEditor extends JFrame {
         return comboBox;
     }
 
+    // Helper method to create a JTextField with consistent styling.
     private JTextField createTextField(String text) {
         JTextField textField = new JTextField(text);
         textField.setBackground(BUTTON_BG);
@@ -1507,6 +1599,7 @@ public class SoundEffectEditor extends JFrame {
         return textField;
     }
 
+    // Helper method to create a JSlider with consistent styling.
     private JSlider createSlider(int min, int max, int value) {
         JSlider slider = new JSlider(min, max, value);
         slider.setBackground(PANEL_BG);
@@ -1517,6 +1610,7 @@ public class SoundEffectEditor extends JFrame {
         slider.setMinorTickSpacing((max - min) / 20);
         slider.setFocusable(false);
 
+        // Custom UI for the slider to match theme
         slider.setUI(new BasicSliderUI(slider) {
             @Override
             public void paintTrack(Graphics g) {
@@ -1539,7 +1633,7 @@ public class SoundEffectEditor extends JFrame {
         return slider;
     }
 
-    // Helper to create an envelope panel
+    // Helper to create an envelope panel with consistent styling and layout.
     private JPanel createEnvelopePanel(String title, JComboBox<String> formComboBox, JTextField startField, JTextField endField, JCheckBox enabledCheckbox) {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBackground(PANEL_BG);
@@ -1549,7 +1643,7 @@ public class SoundEffectEditor extends JFrame {
                 TitledBorder.LEFT,
                 TitledBorder.TOP,
                 new Font("Arial", Font.BOLD, 12),
-                HIGHLIGHT_COLOR_GREEN // Changed to green highlight
+                HIGHLIGHT_COLOR_GREEN
         ));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(2, 5, 2, 5);
@@ -1562,7 +1656,7 @@ public class SoundEffectEditor extends JFrame {
             gbc.gridy = row;
             gbc.gridwidth = 2;
             enabledCheckbox.setBackground(PANEL_BG);
-            enabledCheckbox.setForeground(TEXT_COLOR_LIGHT); // Changed to light text
+            enabledCheckbox.setForeground(TEXT_COLOR_LIGHT);
             enabledCheckbox.setFont(enabledCheckbox.getFont().deriveFont(Font.PLAIN, 11f));
             panel.add(enabledCheckbox, gbc);
             gbc.gridwidth = 1;
@@ -1593,20 +1687,22 @@ public class SoundEffectEditor extends JFrame {
         return panel;
     }
 
+    // Adds a new SoundTone to the current effect.
     private void addSoundTone() {
-        if (currentSoundTones.size() < 10) {
+        if (currentSoundTones.size() < 10) { // Limit to 10 tones
             currentSoundTones.add(new SoundTone());
-            updateToneList(); // This now handles setting selection and calling updateSoundToneEditorPanel()
+            updateToneList(); // Update the JList and select the new tone
         } else {
             JOptionPane.showMessageDialog(this, "Maximum of 10 Sound Tones reached.", "Limit Reached", JOptionPane.WARNING_MESSAGE);
         }
     }
 
+    // Removes the currently selected SoundTone.
     private void removeSelectedSoundTone() {
         int selectedIndex = soundToneList.getSelectedIndex();
         if (selectedIndex != -1 && currentSoundTones.size() > 1) { // Ensure at least one tone remains
             currentSoundTones.remove(selectedIndex);
-            updateToneList(); // This now handles setting selection and calling updateSoundToneEditorPanel()
+            updateToneList();
         } else if (currentSoundTones.size() == 1) {
             JOptionPane.showMessageDialog(this, "Cannot remove the last Sound Tone.", "Minimum Tones", JOptionPane.WARNING_MESSAGE);
         } else {
@@ -1614,9 +1710,10 @@ public class SoundEffectEditor extends JFrame {
         }
     }
 
+    // Updates the JList of sound tones and manages selection.
     private void updateToneList() {
         new Thread(() -> {
-            // Remove the listener to prevent it from firing during model updates
+            // Temporarily remove the listener to prevent it from firing during model updates
             soundToneList.removeListSelectionListener(listSelectionListener);
 
             soundToneListModel.clear();
@@ -1636,27 +1733,34 @@ public class SoundEffectEditor extends JFrame {
                 soundToneList.setSelectedIndex(newSelectionIndex);
             } else {
                 // If no tones left, ensure the panel is cleared.
-                // The listener won't fire if the list becomes empty.
                 clearSoundToneEditorPanel();
             }
         }).start();
     }
 
+    /**
+     * Updates all UI elements in the editor panel to reflect the currently selected SoundTone.
+     * This method is called after a tone is selected or a file is imported.
+     */
     private void updateSoundToneEditorPanel() {
         int selectedIndex = soundToneList.getSelectedIndex();
         if (selectedIndex != -1) {
             currentlyEditedTone = currentSoundTones.get(selectedIndex); // Set the currently edited tone
 
-            // Update main SoundTone parameters
+            // Update main SoundTone parameters sliders
             durationSlider.setValue(currentlyEditedTone.duration);
             offsetSlider.setValue(currentlyEditedTone.offset);
             delayTimeSlider.setValue(currentlyEditedTone.delayTime);
             delayDecaySlider.setValue(currentlyEditedTone.delayDecay);
 
+            // Update oscillator parameters for the currently selected oscillator
             updateOscillatorParametersPanel();
 
+            // Update UI for mandatory envelopes (Pitch, Volume) - always enabled
             updateEnvelopeUI(currentlyEditedTone.pitch, pitchEnvelopeFormComboBox, pitchEnvelopeStartField, pitchEnvelopeEndField, pitchEnvelopeGraphPanel, null);
             updateEnvelopeUI(currentlyEditedTone.volume, volumeEnvelopeFormComboBox, volumeEnvelopeStartField, volumeEnvelopeEndField, volumeEnvelopeGraphPanel, null);
+
+            // Update UI for optional envelopes. The updateEnvelopeUI method handles enabling/disabling controls.
             updateEnvelopeUI(currentlyEditedTone.pitchModifier, pitchModifierFormComboBox, pitchModifierStartField, pitchModifierEndField, pitchModifierEnvelopeGraphPanel, pitchModifierEnabledCheckbox);
             updateEnvelopeUI(currentlyEditedTone.pitchModifierAmplitude, pitchModifierAmplitudeFormComboBox, pitchModifierAmplitudeStartField, pitchModifierAmplitudeEndField, pitchModifierAmplitudeEnvelopeGraphPanel, pitchModifierAmplitudeEnabledCheckbox);
             updateEnvelopeUI(currentlyEditedTone.volumeMultiplier, volumeMultiplierFormComboBox, volumeMultiplierStartField, volumeMultiplierEndField, volumeMultiplierEnvelopeGraphPanel, volumeMultiplierEnabledCheckbox);
@@ -1664,7 +1768,9 @@ public class SoundEffectEditor extends JFrame {
             updateEnvelopeUI(currentlyEditedTone.release, releaseFormComboBox, releaseStartField, releaseEndField, releaseEnvelopeGraphPanel, releaseEnabledCheckbox);
             updateEnvelopeUI(currentlyEditedTone.attack, attackFormComboBox, attackStartField, attackEndField, attackEnvelopeGraphPanel, attackEnabledCheckbox);
 
+            // Update UI for Sound Filter
             if (currentlyEditedTone.filter != null) {
+                // Filter is considered enabled if either pairs[0] or pairs[1] is > 0
                 boolean filterEnabled = currentlyEditedTone.filter.pairs[0] > 0 || currentlyEditedTone.filter.pairs[1] > 0;
                 filterEnabledCheckbox.setSelected(filterEnabled);
 
@@ -1674,15 +1780,15 @@ public class SoundEffectEditor extends JFrame {
                 filterPairs0Slider.setValue(Math.min(currentlyEditedTone.filter.pairs[0], 4));
                 filterPairs1Slider.setValue(Math.min(currentlyEditedTone.filter.pairs[1], 4));
 
-                // Enable/disable based on filterEnabledCheckbox
+                // Enable/disable filter controls based on filterEnabled state
                 filterUnity0Slider.setEnabled(filterEnabled);
                 filterUnity1Slider.setEnabled(filterEnabled);
                 filterPairs0Slider.setEnabled(filterEnabled);
                 filterPairs1Slider.setEnabled(filterEnabled);
-                updateFilterPairsPanel(filterEnabled); // Update dynamic filter controls
-
-                filterGraphPanel.setFilter(currentlyEditedTone.filter);
+                updateFilterPairsPanel(filterEnabled); // Update dynamic filter coefficient controls
+                filterGraphPanel.setFilter(currentlyEditedTone.filter); // Update filter graph
             } else {
+                // If filter object is null, disable all filter-related UI
                 filterEnabledCheckbox.setSelected(false);
                 filterUnity0Slider.setValue(0);
                 filterUnity1Slider.setValue(0);
@@ -1693,10 +1799,11 @@ public class SoundEffectEditor extends JFrame {
                 filterPairs0Slider.setEnabled(false);
                 filterPairs1Slider.setEnabled(false);
                 updateFilterPairsPanel(false); // Clear dynamic filter controls
-                filterGraphPanel.setFilter(null);
+                filterGraphPanel.setFilter(null); // Clear filter graph
             }
 
         } else {
+            // If no tone is selected, clear all editor panels
             clearSoundToneEditorPanel();
             currentlyEditedTone = null; // Clear the reference
         }
@@ -1707,37 +1814,50 @@ public class SoundEffectEditor extends JFrame {
         envelopeAndFilterPanel.repaint();
     }
 
+    /**
+     * Updates the UI for a specific SoundEnvelope.
+     * This method is crucial for correctly enabling/disabling optional envelopes.
+     *
+     * @param envelope The SoundEnvelope object to display (can be null for optional envelopes).
+     * @param formComboBox The JComboBox for the envelope's form.
+     * @param startField The JTextField for the envelope's start value.
+     * @param endField The JTextField for the envelope's end value.
+     * @param graphPanel The EnvelopeGraphPanel for visualization.
+     * @param enabledCheckbox The JCheckBox to enable/disable this optional envelope (null for mandatory ones).
+     */
     private void updateEnvelopeUI(SoundEnvelope envelope, JComboBox<String> formComboBox, JTextField startField, JTextField endField, EnvelopeGraphPanel graphPanel, JCheckBox enabledCheckbox) {
-        if (enabledCheckbox != null) {
+        if (enabledCheckbox != null) { // This block handles optional envelopes
             if (envelope != null) {
-                enabledCheckbox.setSelected(envelope.form != 0);
-                int formIndex = envelope.form == 0 ? 4 : envelope.form - 1;
+                // If envelope object exists, set checkbox and populate values
+                enabledCheckbox.setSelected(envelope.form != 0); // Checkbox reflects if form is non-zero
+                int formIndex = envelope.form == 0 ? 4 : envelope.form - 1; // Convert form (1-4) to index (0-3), 0 to 4 ("Off")
                 if (formIndex >= 0 && formIndex < formComboBox.getItemCount()) {
                     formComboBox.setSelectedIndex(formIndex);
                 } else {
-                    formComboBox.setSelectedIndex(4); // Default to "Off" if invalid
+                    formComboBox.setSelectedIndex(4); // Default to "Off" if invalid form
                 }
                 startField.setText(String.valueOf(envelope.start));
                 endField.setText(String.valueOf(envelope.end));
-                graphPanel.setEnvelope(envelope);
+                graphPanel.setEnvelope(envelope); // Update graph with current envelope
                 // Enable controls if checkbox is selected
                 boolean isActive = enabledCheckbox.isSelected();
                 formComboBox.setEnabled(isActive);
                 startField.setEnabled(isActive);
                 endField.setEnabled(isActive);
-            } else { // If envelope object is null (not present in file)
-                enabledCheckbox.setSelected(false);
-                formComboBox.setSelectedIndex(4); // "Off"
+            } else { // If envelope object is null (e.g., not present in imported file or disabled by user)
+                enabledCheckbox.setSelected(false); // Uncheck the enable checkbox
+                formComboBox.setSelectedIndex(4); // Set form to "Off"
                 startField.setText("0");
                 endField.setText("0");
-                graphPanel.setEnvelope(null);
-                // Disable all controls
+                graphPanel.setEnvelope(null); // Clear the graph
+                // Disable all controls for this envelope
                 formComboBox.setEnabled(false);
                 startField.setEnabled(false);
                 endField.setEnabled(false);
             }
-        } else { // For always-present envelopes (pitch, volume)
+        } else { // This block handles always-present envelopes (pitch, volume)
             if (envelope != null) {
+                // These envelopes are always active, so just populate values
                 int formIndex = envelope.form == 0 ? 4 : envelope.form - 1;
                 if (formIndex >= 0 && formIndex < formComboBox.getItemCount()) {
                     formComboBox.setSelectedIndex(formIndex);
@@ -1752,8 +1872,8 @@ public class SoundEffectEditor extends JFrame {
                 startField.setEnabled(true);
                 endField.setEnabled(true);
             } else {
-                // This case should ideally not happen for pitch/volume envelopes
-                // but as a fallback, clear and disable.
+                // This case should ideally not happen for pitch/volume envelopes as they are always instantiated.
+                // As a fallback, clear and disable.
                 formComboBox.setSelectedIndex(4); // "Off"
                 startField.setText("0");
                 endField.setText("0");
@@ -1765,7 +1885,7 @@ public class SoundEffectEditor extends JFrame {
         }
     }
 
-
+    // Clears all UI elements in the editor panel.
     private void clearSoundToneEditorPanel() {
         durationSlider.setValue(0);
         offsetSlider.setValue(0);
@@ -1776,11 +1896,11 @@ public class SoundEffectEditor extends JFrame {
         currentlySelectedOscillatorIndex = 0;
         updateOscillatorParametersPanel(); // This will set current osc params to 0
 
-        // For always-present envelopes, pass a new default instance
+        // For always-present envelopes, pass a new default instance to reset their UI
         updateEnvelopeUI(new SoundEnvelope(), pitchEnvelopeFormComboBox, pitchEnvelopeStartField, pitchEnvelopeEndField, pitchEnvelopeGraphPanel, null);
         updateEnvelopeUI(new SoundEnvelope(), volumeEnvelopeFormComboBox, volumeEnvelopeStartField, volumeEnvelopeEndField, volumeEnvelopeGraphPanel, null);
 
-        // For optional envelopes, pass null to clear and disable
+        // For optional envelopes, pass null to clear and disable their UI
         updateEnvelopeUI(null, pitchModifierFormComboBox, pitchModifierStartField, pitchModifierEndField, pitchModifierEnvelopeGraphPanel, pitchModifierEnabledCheckbox);
         updateEnvelopeUI(null, pitchModifierAmplitudeFormComboBox, pitchModifierAmplitudeStartField, pitchModifierAmplitudeEndField, pitchModifierAmplitudeEnvelopeGraphPanel, pitchModifierAmplitudeEnabledCheckbox);
         updateEnvelopeUI(null, volumeMultiplierFormComboBox, volumeMultiplierStartField, volumeMultiplierEndField, volumeMultiplierEnvelopeGraphPanel, volumeMultiplierEnabledCheckbox);
@@ -1788,6 +1908,7 @@ public class SoundEffectEditor extends JFrame {
         updateEnvelopeUI(null, releaseFormComboBox, releaseStartField, releaseEndField, releaseEnvelopeGraphPanel, releaseEnabledCheckbox);
         updateEnvelopeUI(null, attackFormComboBox, attackStartField, attackEndField, attackEnvelopeGraphPanel, attackEnabledCheckbox);
 
+        // Clear and disable filter UI
         filterEnabledCheckbox.setSelected(false);
         filterUnity0Slider.setValue(0);
         filterUnity1Slider.setValue(0);
@@ -1798,27 +1919,34 @@ public class SoundEffectEditor extends JFrame {
         filterPairs0Slider.setEnabled(false);
         filterPairs1Slider.setEnabled(false);
         updateFilterPairsPanel(false); // Clear dynamic filter controls
-        filterGraphPanel.setFilter(null);
+        filterGraphPanel.setFilter(null); // Clear filter graph
 
         waveformDisplayPanel.setAudioData(new byte[0]); // Clear waveform data
     }
 
-    // Update the UI for the currently selected oscillator
+    // Update the UI for the currently selected oscillator.
     private void updateOscillatorParametersPanel() {
         if (currentlyEditedTone != null && currentlySelectedOscillatorIndex >= 0 && currentlySelectedOscillatorIndex < MAX_OSCILLATORS) {
             oscVolumeSlider.setValue(currentlyEditedTone.oscillatorVolume[currentlySelectedOscillatorIndex]);
             oscPitchSlider.setValue(currentlyEditedTone.oscillatorPitch[currentlySelectedOscillatorIndex]);
             oscDelaySlider.setValue(currentlyEditedTone.oscillatorDelays[currentlySelectedOscillatorIndex]);
         } else {
+            // If no tone selected or invalid oscillator index, reset sliders to 0
             oscVolumeSlider.setValue(0);
             oscPitchSlider.setValue(0);
             oscDelaySlider.setValue(0);
         }
     }
 
-    // Dynamically update the filter pairs panel
+    /**
+     * Dynamically updates the filter pairs panel with text fields for phase and magnitude.
+     * These fields are only shown if the filter is enabled and has pairs.
+     *
+     * @param enabled True if the filter is enabled, false otherwise.
+     */
     private void updateFilterPairsPanel(boolean enabled) {
         filterPairsPanel.removeAll(); // Clear existing controls
+        // If filter is not enabled or no tone is selected, just clear and return.
         if (currentlyEditedTone == null || !enabled || currentlyEditedTone.filter == null) {
             filterPairsPanel.revalidate();
             filterPairsPanel.repaint();
@@ -1830,7 +1958,7 @@ public class SoundEffectEditor extends JFrame {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.WEST;
 
-        // Direction 0 (Input)
+        // Direction 0 (Input) coefficients
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.gridwidth = 4;
@@ -1840,10 +1968,11 @@ public class SoundEffectEditor extends JFrame {
         // Clamp the iteration count for UI elements to the array size (4)
         int numPairs0 = Math.min(currentlyEditedTone.filter.pairs[0], 4);
         for (int i = 0; i < numPairs0; i++) {
-            final int pairIndex = i;
+            final int pairIndex = i; // Need final variable for anonymous inner class
             gbc.gridy++;
             filterPairsPanel.add(createLabel("Pair " + (i + 1) + " (0):"), gbc);
 
+            // Phase 0 field
             gbc.gridx = 1;
             filterPairsPanel.add(createLabel("Phase 0:"), gbc);
             JTextField phase0Field = createTextField(String.valueOf(currentlyEditedTone.filter.phases[0][0][i]));
@@ -1863,6 +1992,7 @@ public class SoundEffectEditor extends JFrame {
             gbc.gridx = 2;
             filterPairsPanel.add(phase0Field, gbc);
 
+            // Magnitude 0 field
             gbc.gridx = 3;
             filterPairsPanel.add(createLabel("Mag 0:"), gbc);
             JTextField mag0Field = createTextField(String.valueOf(currentlyEditedTone.filter.magnitudes[0][0][i]));
@@ -1882,6 +2012,7 @@ public class SoundEffectEditor extends JFrame {
             gbc.gridx = 4;
             filterPairsPanel.add(mag0Field, gbc);
 
+            // Phase 1 field
             gbc.gridx = 1;
             gbc.gridy++;
             filterPairsPanel.add(createLabel("Phase 1:"), gbc);
@@ -1902,6 +2033,7 @@ public class SoundEffectEditor extends JFrame {
             gbc.gridx = 2;
             filterPairsPanel.add(phase1Field, gbc);
 
+            // Magnitude 1 field
             gbc.gridx = 3;
             filterPairsPanel.add(createLabel("Mag 1:"), gbc);
             JTextField mag1Field = createTextField(String.valueOf(currentlyEditedTone.filter.magnitudes[0][1][i]));
@@ -1922,14 +2054,13 @@ public class SoundEffectEditor extends JFrame {
             filterPairsPanel.add(mag1Field, gbc);
         }
 
-        // Direction 1 (Output)
+        // Direction 1 (Output) coefficients
         gbc.gridx = 0;
         gbc.gridy++;
         gbc.gridwidth = 4;
         filterPairsPanel.add(createLabel("Direction 1 (Output)"), gbc);
         gbc.gridwidth = 1;
 
-        // Clamp the iteration count for UI elements to the array size (4)
         int numPairs1 = Math.min(currentlyEditedTone.filter.pairs[1], 4);
         for (int i = 0; i < numPairs1; i++) {
             final int pairIndex = i;
@@ -2018,38 +2149,49 @@ public class SoundEffectEditor extends JFrame {
         filterPairsPanel.repaint();
     }
 
+    // Updates the filter phase value in the data model.
     private void updateFilterPhase(int direction, int phaseType, int pairIndex, JTextField field) {
         if (currentlyEditedTone != null && currentlyEditedTone.filter != null) {
             try {
+                int parsedValue = Integer.parseInt(field.getText());
                 // Ensure index is within bounds before assignment
                 if (pairIndex < currentlyEditedTone.filter.phases[direction][phaseType].length) {
-                    currentlyEditedTone.filter.phases[direction][phaseType][pairIndex] = Integer.parseInt(field.getText());
+                    currentlyEditedTone.filter.phases[direction][phaseType][pairIndex] = parsedValue;
                     debounceTimer.restart();
                 }
+                field.setBorder(UIManager.getBorder("TextField.border")); // Reset border on valid input
             } catch (NumberFormatException e) {
-                throw new RuntimeException(e);
+                field.setBorder(BorderFactory.createLineBorder(Color.RED, 1)); // Indicate error
+                // System.err.println("Invalid number format for filter phase: " + field.getText());
             }
         }
     }
 
+    // Updates the filter magnitude value in the data model.
     private void updateFilterMagnitude(int direction, int phaseType, int pairIndex, JTextField field) {
         if (currentlyEditedTone != null && currentlyEditedTone.filter != null) {
             try {
+                int parsedValue = Integer.parseInt(field.getText());
                 // Ensure index is within bounds before assignment
                 if (pairIndex < currentlyEditedTone.filter.magnitudes[direction][phaseType].length) {
-                    currentlyEditedTone.filter.magnitudes[direction][phaseType][pairIndex] = Integer.parseInt(field.getText());
+                    currentlyEditedTone.filter.magnitudes[direction][phaseType][pairIndex] = parsedValue;
                     debounceTimer.restart();
                 }
+                field.setBorder(UIManager.getBorder("TextField.border")); // Reset border on valid input
             } catch (NumberFormatException e) {
-                throw new RuntimeException(e);
+                field.setBorder(BorderFactory.createLineBorder(Color.RED, 1)); // Indicate error
+                // System.err.println("Invalid number format for filter magnitude: " + field.getText());
             }
         }
     }
 
 
-    // Add all listeners once during initialization
+    /**
+     * Adds all global parameter listeners to UI components.
+     * This method is called once during initialization.
+     */
     private void addGlobalParameterListeners() {
-        // ChangeListener for sliders - triggers debounce timer
+        // ChangeListener for sliders - triggers debounce timer to update graphs/waveform
         ChangeListener sliderChangeListener = _ -> {
             if (currentlyEditedTone != null) {
                 currentlyEditedTone.duration = durationSlider.getValue();
@@ -2064,18 +2206,20 @@ public class SoundEffectEditor extends JFrame {
                     currentlyEditedTone.oscillatorDelays[currentlySelectedOscillatorIndex] = oscDelaySlider.getValue();
                 }
 
+                // Update filter unity and pairs values
                 if (currentlyEditedTone.filter != null) {
                     currentlyEditedTone.filter.unity[0] = filterUnity0Slider.getValue();
                     currentlyEditedTone.filter.unity[1] = filterUnity1Slider.getValue();
                     // Update the filter's internal pairs directly from the slider values
                     currentlyEditedTone.filter.pairs[0] = filterPairs0Slider.getValue();
                     currentlyEditedTone.filter.pairs[1] = filterPairs1Slider.getValue();
-                    updateFilterPairsPanel(filterEnabledCheckbox.isSelected()); // Rebuild filter pair UI
+                    updateFilterPairsPanel(filterEnabledCheckbox.isSelected()); // Rebuild filter pair UI if pairs changed
                 }
                 debounceTimer.restart(); // Restart the timer on every change
             }
         };
 
+        // Apply slider listeners
         durationSlider.addChangeListener(sliderChangeListener);
         offsetSlider.addChangeListener(sliderChangeListener);
         delayTimeSlider.addChangeListener(sliderChangeListener);
@@ -2089,14 +2233,7 @@ public class SoundEffectEditor extends JFrame {
         filterPairs1Slider.addChangeListener(sliderChangeListener);
 
 
-        // Helper to add listeners to an envelope's UI components
-        java.util.function.BiConsumer<SoundEnvelope, JComboBox<String>> formListener = (env, combo) -> combo.addActionListener(_ -> {
-            if (currentlyEditedTone != null && env != null) { // Ensure envelope object exists
-                int selectedIndex = combo.getSelectedIndex();
-                env.form = selectedIndex == 4 ? 0 : selectedIndex + 1; // "Off" is 0, others 1-4
-                debounceTimer.restart();
-            }
-        });
+        // Helper to create DocumentListener for text fields
         java.util.function.Consumer<JTextField> createTextFieldListener = (field) -> field.getDocument().addDocumentListener(new DocumentListener() {
             private void updateValue() {
                 if (currentlyEditedTone != null) {
@@ -2140,20 +2277,11 @@ public class SoundEffectEditor extends JFrame {
                         else if (field == attackEndField && currentlyEditedTone.attack != null)
                             currentlyEditedTone.attack.end = parsedValue;
 
-                        // Only restart timer if parsing was successful
-                        debounceTimer.restart();
-
-                        // Optional: Reset field border to default if it was previously red
-                        field.setBorder(UIManager.getBorder("TextField.border")); // Or your default border
+                        debounceTimer.restart(); // Only restart timer if parsing was successful
+                        field.setBorder(UIManager.getBorder("TextField.border")); // Reset border to default
                     } catch (NumberFormatException ex) {
-                        // Provide immediate visual feedback to the user
-                        // 1. Change border to red
-                        field.setBorder(BorderFactory.createLineBorder(Color.RED, 1));
-                        // 2. Show a small tooltip or status message (optional)
-                        // field.setToolTipText("Please enter a valid number.");
-                        // 3. You can also print to console for debugging, but user feedback is key
-                        System.out.println("Invalid number: " + field.getText() + " - " + ex.getMessage());
-
+                        field.setBorder(BorderFactory.createLineBorder(Color.RED, 1)); // Indicate invalid input
+                        // System.out.println("Invalid number: " + field.getText() + " - " + ex.getMessage());
                         // IMPORTANT: Do NOT restart debounceTimer here, as the input is invalid
                     }
                 }
@@ -2175,7 +2303,7 @@ public class SoundEffectEditor extends JFrame {
             }
         });
 
-        // Apply listeners to all envelope text fields
+        // Apply DocumentListeners to all envelope text fields
         createTextFieldListener.accept(pitchEnvelopeStartField);
         createTextFieldListener.accept(pitchEnvelopeEndField);
         createTextFieldListener.accept(volumeEnvelopeStartField);
@@ -2194,12 +2322,25 @@ public class SoundEffectEditor extends JFrame {
         createTextFieldListener.accept(attackEndField);
 
 
-        // Apply form listeners to all envelopes
-        // For mandatory envelopes, they are always present, so we can directly pass their instances
-        formListener.accept(currentlyEditedTone.pitch, pitchEnvelopeFormComboBox);
-        formListener.accept(currentlyEditedTone.volume, volumeEnvelopeFormComboBox);
-        // For optional envelopes, add listeners only if they are not null (i.e., created by enabling checkbox)
-        // The checkbox action listener will handle creating the object if it's null.
+        // Add ActionListener for form combo boxes
+        // For mandatory envelopes, they are always present.
+        pitchEnvelopeFormComboBox.addActionListener(_ -> {
+            if (currentlyEditedTone != null && currentlyEditedTone.pitch != null) {
+                int selectedIndex = pitchEnvelopeFormComboBox.getSelectedIndex();
+                currentlyEditedTone.pitch.form = selectedIndex == 4 ? 0 : selectedIndex + 1; // "Off" is 0, others 1-4
+                debounceTimer.restart();
+            }
+        });
+        volumeEnvelopeFormComboBox.addActionListener(_ -> {
+            if (currentlyEditedTone != null && currentlyEditedTone.volume != null) {
+                int selectedIndex = volumeEnvelopeFormComboBox.getSelectedIndex();
+                currentlyEditedTone.volume.form = selectedIndex == 4 ? 0 : selectedIndex + 1;
+                debounceTimer.restart();
+            }
+        });
+
+        // For optional envelopes, add listeners that check if the object exists before updating.
+        // The checkbox listeners will handle creating the object if it's null.
         pitchModifierFormComboBox.addActionListener(_ -> {
             if (currentlyEditedTone != null && currentlyEditedTone.pitchModifier != null) {
                 int selectedIndex = pitchModifierFormComboBox.getSelectedIndex();
@@ -2243,6 +2384,8 @@ public class SoundEffectEditor extends JFrame {
             }
         });
 
+        // Add ActionListeners for "Enable" checkboxes for optional envelopes.
+        // These listeners create/nullify the SoundEnvelope objects and update the UI.
         pitchModifierEnabledCheckbox.addActionListener(_ -> {
             if (currentlyEditedTone != null) {
                 boolean enabled = pitchModifierEnabledCheckbox.isSelected();
@@ -2250,13 +2393,14 @@ public class SoundEffectEditor extends JFrame {
                     if (currentlyEditedTone.pitchModifier == null) {
                         currentlyEditedTone.pitchModifier = new SoundEnvelope();
                         currentlyEditedTone.pitchModifierAmplitude = new SoundEnvelope();
-                        currentlyEditedTone.pitchModifier.form = 1;
+                        currentlyEditedTone.pitchModifier.form = 1; // Default to Square wave when enabled
                         currentlyEditedTone.pitchModifierAmplitude.form = 1;
                     }
                 } else {
                     currentlyEditedTone.pitchModifier = null;
                     currentlyEditedTone.pitchModifierAmplitude = null;
                 }
+                // Update UI for both pitch modifier and its amplitude envelope
                 updateEnvelopeUI(currentlyEditedTone.pitchModifier, pitchModifierFormComboBox, pitchModifierStartField, pitchModifierEndField, pitchModifierEnvelopeGraphPanel, pitchModifierEnabledCheckbox);
                 updateEnvelopeUI(currentlyEditedTone.pitchModifierAmplitude, pitchModifierAmplitudeFormComboBox, pitchModifierAmplitudeStartField, pitchModifierAmplitudeEndField, pitchModifierAmplitudeEnvelopeGraphPanel, pitchModifierAmplitudeEnabledCheckbox);
                 debounceTimer.restart();
@@ -2337,6 +2481,7 @@ public class SoundEffectEditor extends JFrame {
         attackEnabledCheckbox.addActionListener(_ -> {
             if (currentlyEditedTone != null) {
                 boolean enabled = attackEnabledCheckbox.isSelected();
+                // Attack can only be enabled if Release is also enabled (as they are paired)
                 if (enabled && currentlyEditedTone.release != null) {
                     if (currentlyEditedTone.attack == null) {
                         currentlyEditedTone.attack = new SoundEnvelope();
@@ -2350,7 +2495,7 @@ public class SoundEffectEditor extends JFrame {
             }
         });
 
-
+        // Listener for Filter Enabled checkbox
         filterEnabledCheckbox.addActionListener(_ -> {
             if (currentlyEditedTone != null) {
                 boolean enabled = filterEnabledCheckbox.isSelected();
@@ -2359,6 +2504,7 @@ public class SoundEffectEditor extends JFrame {
                         currentlyEditedTone.filter = new SoundFilter();
                         currentlyEditedTone.filterEnvelope = new SoundEnvelope();
                     }
+                    // Set default values when filter is enabled
                     currentlyEditedTone.filter.pairs[0] = 1;
                     currentlyEditedTone.filter.pairs[1] = 1;
                     currentlyEditedTone.filter.unity[0] = 32768;
@@ -2368,11 +2514,13 @@ public class SoundEffectEditor extends JFrame {
                     currentlyEditedTone.filterEnvelope = null;
                 }
 
+                // Enable/disable filter UI controls
                 filterUnity0Slider.setEnabled(enabled);
                 filterUnity1Slider.setEnabled(enabled);
                 filterPairs0Slider.setEnabled(enabled);
                 filterPairs1Slider.setEnabled(enabled);
 
+                // Update slider values based on enabled/disabled state
                 if (currentlyEditedTone.filter != null) {
                     filterUnity0Slider.setValue(currentlyEditedTone.filter.unity[0]);
                     filterUnity1Slider.setValue(currentlyEditedTone.filter.unity[1]);
@@ -2391,6 +2539,7 @@ public class SoundEffectEditor extends JFrame {
         });
     }
 
+    // Updates the waveform display based on the currently edited tone.
     private void updateWaveformDisplay() {
         if (currentlyEditedTone != null) {
             try {
@@ -2406,8 +2555,6 @@ public class SoundEffectEditor extends JFrame {
                 int[] rawSamplesInt = currentlyEditedTone.synthesize(steps, durationMs);
 
                 // Convert to byte array based on selected output bit depth for display
-                // Note: The mix() method in SoundEffect converts to 8-bit.
-                // For individual tone display, we convert the 16-bit int[] to the selected bit depth.
                 byte[] audioDataForDisplay = convertRawSamplesToPlaybackFormat(rawSamplesInt, outputBitDepth);
                 waveformDisplayPanel.setAudioData(audioDataForDisplay);
             } catch (Exception ex) {
@@ -2459,6 +2606,7 @@ public class SoundEffectEditor extends JFrame {
 
     // --- Sound Playback ---
 
+    // Plays the given audio data with specified format.
     private void playSound(byte[] audioData, int sampleRate, int bitDepth) {
         stopSoundEffect(); // Stop any currently playing sound
 
@@ -2505,30 +2653,35 @@ public class SoundEffectEditor extends JFrame {
         }
     }
 
+    // Creates a new SoundEffect instance populated with currentSoundTones.
     private SoundEffect newSoundEffectInstance() {
         SoundEffect newSoundEffect = new SoundEffect();
 
+        // Copy current sound tones into the new SoundEffect instance.
         for (int i = 0; i < currentSoundTones.size(); i++) {
             if (i < newSoundEffect.soundTones.length) {
                 newSoundEffect.soundTones[i] = currentSoundTones.get(i);
             }
         }
 
+        // Nullify any remaining tones in the SoundEffect array if currentSoundTones is smaller.
         for (int i = currentSoundTones.size(); i < newSoundEffect.soundTones.length; i++) {
             newSoundEffect.soundTones[i] = null;
         }
 
+        // Calculate the maximum duration for the overall effect.
         int maxDuration = 0;
         for (SoundTone tone : currentSoundTones) {
             if (tone != null) {
                 maxDuration = Math.max(maxDuration, tone.duration + tone.offset);
             }
         }
-        newSoundEffect.start = 0;
+        newSoundEffect.start = 0; // Start and end are meta-data, not directly used in mix()
         newSoundEffect.end = maxDuration;
         return newSoundEffect;
     }
 
+    // Plays the full sound effect by mixing all active tones.
     private void playSoundEffect() {
         if (currentSoundTones.isEmpty()) {
             JOptionPane.showMessageDialog(this, "No Sound Tones to play.", "Playback Error", JOptionPane.WARNING_MESSAGE);
@@ -2536,20 +2689,24 @@ public class SoundEffectEditor extends JFrame {
         }
 
         try {
-            byte[] rawSamples8Bit = newSoundEffectInstance().rawAudioData;
+            // Mix all tones into an 8-bit raw audio data array.
+            byte[] combinedRawSamples8Bit = newSoundEffectInstance().mix();
             byte[] audioDataForPlayback;
+
+            // Convert to the selected output bit depth for playback.
             if (outputBitDepth == 8) {
-                audioDataForPlayback = rawSamples8Bit;
+                audioDataForPlayback = combinedRawSamples8Bit;
             } else {
-                audioDataForPlayback = new byte[rawSamples8Bit.length * 2];
-                for (int i = 0; i < rawSamples8Bit.length; i++) {
-                    short sample16 = (short) (rawSamples8Bit[i] * 256);
-                    audioDataForPlayback[i * 2] = (byte) (sample16 & 0xFF);
-                    audioDataForPlayback[i * 2 + 1] = (byte) ((sample16 >> 8) & 0xFF);
+                // Convert 8-bit mixed data to 16-bit for playback.
+                audioDataForPlayback = new byte[combinedRawSamples8Bit.length * 2];
+                for (int i = 0; i < combinedRawSamples8Bit.length; i++) {
+                    short sample16 = (short) (combinedRawSamples8Bit[i] * 256); // Scale 8-bit to 16-bit range
+                    audioDataForPlayback[i * 2] = (byte) (sample16 & 0xFF);         // LSB
+                    audioDataForPlayback[i * 2 + 1] = (byte) ((sample16 >> 8) & 0xFF); // MSB
                 }
             }
 
-            int sampleRate = 22050;
+            int sampleRate = 22050; // Standard sample rate
 
             playSound(audioDataForPlayback, sampleRate, outputBitDepth);
 
@@ -2558,6 +2715,7 @@ public class SoundEffectEditor extends JFrame {
         }
     }
 
+    // Plays only the currently selected sound tone.
     private void playSelectedSoundTone() {
         int selectedIndex = soundToneList.getSelectedIndex();
         if (selectedIndex == -1) {
@@ -2573,7 +2731,9 @@ public class SoundEffectEditor extends JFrame {
                 JOptionPane.showMessageDialog(this, "Selected tone has zero or negative duration, cannot synthesize.", "Synthesis Error", JOptionPane.WARNING_MESSAGE);
                 return;
             }
+            // Synthesize the individual tone (produces 16-bit int samples).
             int[] rawSamplesInt = selectedTone.synthesize(steps, selectedTone.duration);
+            // Convert to selected output bit depth for playback.
             byte[] audioData = convertRawSamplesToPlaybackFormat(rawSamplesInt, outputBitDepth);
             playSound(audioData, 22050, outputBitDepth);
         } catch (Exception ex) {
@@ -2582,6 +2742,7 @@ public class SoundEffectEditor extends JFrame {
     }
 
 
+    // Stops any currently playing sound.
     private void stopSoundEffect() {
         if (audioClip != null && audioClip.isRunning()) {
             audioClip.stop();
@@ -2611,7 +2772,7 @@ public class SoundEffectEditor extends JFrame {
             try (FileOutputStream fos = new FileOutputStream(fileToSave);
                  DataOutputStream dos = new DataOutputStream(fos)) {
 
-                // Encode the SoundEffect into a byte array
+                // Encode the SoundEffect into a byte array using its custom encode method.
                 byte[] encodedData = newSoundEffectInstance().encode();
 
                 // Write the collected bytes to the file
@@ -2644,20 +2805,24 @@ public class SoundEffectEditor extends JFrame {
 
                 byte[] fileBytes = bis.readAllBytes();
                 Buffer inputBuffer = new Buffer(fileBytes);
+                // Decode the entire SoundEffect from the loaded bytes.
                 SoundEffect loadedSoundEffect = new SoundEffect(inputBuffer);
 
+                // Clear current tones and populate with loaded tones.
                 currentSoundTones.clear();
                 for (SoundTone tone : loadedSoundEffect.soundTones) {
-                    if (tone != null) {
+                    if (tone != null) { // Only add non-null tones
                         currentSoundTones.add(tone);
                     }
                 }
 
+                // If no valid tones were found in the file, add a default one.
                 if (currentSoundTones.isEmpty()) {
                     currentSoundTones.add(new SoundTone());
                     JOptionPane.showMessageDialog(this, "No valid sound tones found in the file. A default tone has been loaded.", "Import Warning", JOptionPane.WARNING_MESSAGE);
                 }
 
+                // Update the tone list and trigger UI refresh for the selected tone.
                 updateToneList();
                 JOptionPane.showMessageDialog(this, "Sound effect loaded successfully!", "Import Complete", JOptionPane.INFORMATION_MESSAGE);
 
@@ -2666,6 +2831,7 @@ public class SoundEffectEditor extends JFrame {
             } catch (IOException ex) {
                 JOptionPane.showMessageDialog(this, "Error reading file: " + ex.getMessage(), "Import Error", JOptionPane.ERROR_MESSAGE);
             } catch (ArrayIndexOutOfBoundsException ex) {
+                // This typically indicates a malformed file that doesn't match the expected binary structure.
                 JOptionPane.showMessageDialog(this, "Error decoding file: The file format appears to be corrupted or incompatible. " + "Details: " + ex.getMessage() + "\n\nPlease ensure it's a valid JagFX sound effect file.", "Import Error: File Format Mismatch", JOptionPane.ERROR_MESSAGE);
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(this, "An unexpected error occurred during import: " + ex.getMessage(), "Import Error", JOptionPane.ERROR_MESSAGE);
@@ -2691,19 +2857,24 @@ public class SoundEffectEditor extends JFrame {
             }
 
             try {
+                // Mix all tones into an 8-bit raw audio data array.
                 byte[] combinedRawSamples8Bit = newSoundEffectInstance().mix();
+                // Convert to 16-bit for WAV export (WAV usually uses 16-bit for better quality).
                 byte[] wavData16Bit = new byte[combinedRawSamples8Bit.length * 2];
                 for (int i = 0; i < combinedRawSamples8Bit.length; i++) {
-                    short sample16 = (short) (combinedRawSamples8Bit[i] * 256);
-                    wavData16Bit[i * 2] = (byte) (sample16 & 0xFF);
-                    wavData16Bit[i * 2 + 1] = (byte) ((sample16 >> 8) & 0xFF);
+                    short sample16 = (short) (combinedRawSamples8Bit[i] * 256); // Scale 8-bit to 16-bit range
+                    wavData16Bit[i * 2] = (byte) (sample16 & 0xFF);         // LSB
+                    wavData16Bit[i * 2 + 1] = (byte) ((sample16 >> 8) & 0xFF); // MSB
                 }
 
+                // Define AudioFormat for 16-bit, mono, signed, little-endian PCM.
                 AudioFormat format = new AudioFormat(22050, 16, 1, true, false);
 
+                // Create AudioInputStream from the byte array.
                 ByteArrayInputStream bais = new ByteArrayInputStream(wavData16Bit);
                 AudioInputStream audioInputStream = new AudioInputStream(bais, format, wavData16Bit.length / format.getFrameSize());
 
+                // Write to WAV file.
                 AudioSystem.write(audioInputStream, AudioFileFormat.Type.WAVE, fileToSave);
 
                 audioInputStream.close();
@@ -2724,6 +2895,9 @@ public class SoundEffectEditor extends JFrame {
         SwingUtilities.invokeLater(SoundEffectEditor::new);
     }
 
+    /**
+     * Custom JPanel for drawing SoundEnvelope graphs.
+     */
     private class EnvelopeGraphPanel extends JPanel {
 
         private SoundEnvelope envelope;
@@ -2740,13 +2914,13 @@ public class SoundEffectEditor extends JFrame {
                     TitledBorder.LEFT,
                     TitledBorder.TOP,
                     new Font("Arial", Font.BOLD, 12),
-                    HIGHLIGHT_COLOR_GREEN // Changed to green highlight
+                    HIGHLIGHT_COLOR_GREEN
             ));
         }
 
         public void setEnvelope(SoundEnvelope envelope) {
             this.envelope = envelope;
-            repaint();
+            repaint(); // Request repaint when envelope data changes
         }
 
         @Override
@@ -2761,32 +2935,31 @@ public class SoundEffectEditor extends JFrame {
             // Draw grid
             g2d.setColor(gridColor);
             for (int i = 0; i <= 10; i++) {
-                g2d.drawLine(0, i * height / 10, width, i * height / 10); // Horizontal
-                g2d.drawLine(i * width / 10, 0, i * width / 10, height); // Vertical
+                g2d.drawLine(0, i * height / 10, width, i * height / 10); // Horizontal lines
+                g2d.drawLine(i * width / 10, 0, i * width / 10, height); // Vertical lines
             }
 
-            if (envelope != null && envelope.form != 0) { // Only draw if envelope is active
+            // Only draw envelope if it's active (not null and form is not 0)
+            if (envelope != null && envelope.form != 0) {
                 g2d.setColor(lineColor);
                 g2d.setStroke(new BasicStroke(2)); // Thicker line for emphasis
                 Path2D.Float path = new Path2D.Float();
 
-                // To draw a more accurate envelope, we need to simulate its doStep method
-                // over a range of 'period' (time).
-                // Let's simulate 1000 steps for the graph.
+                // Simulate envelope over a fixed number of graph steps for visualization
                 int graphSteps = 1000;
                 int maxEnvelopeValue = 32768; // Max value for envelope output (from doStep)
 
-                // Create a temporary envelope instance to avoid modifying the actual one
+                // Create a temporary envelope instance to avoid modifying the actual one's state
                 SoundEnvelope tempEnvelope = new SoundEnvelope();
                 tempEnvelope.form = envelope.form;
                 tempEnvelope.start = envelope.start;
                 tempEnvelope.end = envelope.end;
-                tempEnvelope.segments = envelope.segments; // Correctly copy the int value
-                tempEnvelope.durations = Arrays.copyOf(envelope.durations, envelope.durations.length); // Correctly copy the array
-                tempEnvelope.phases = Arrays.copyOf(envelope.phases, envelope.phases.length); // Correctly copy the array
-                tempEnvelope.reset();
+                tempEnvelope.segments = envelope.segments;
+                tempEnvelope.durations = Arrays.copyOf(envelope.durations, envelope.durations.length);
+                tempEnvelope.phases = Arrays.copyOf(envelope.phases, envelope.phases.length);
+                tempEnvelope.reset(); // Reset its internal state
 
-                // Calculate the period based on the current tone's duration
+                // Calculate the period based on the current tone's duration for realistic graph scaling
                 int period = currentlyEditedTone != null && currentlyEditedTone.duration > 0 ? currentlyEditedTone.duration : 500; // Default if no tone selected or duration is 0
 
                 for (int i = 0; i <= graphSteps; i++) {
@@ -2826,13 +2999,13 @@ public class SoundEffectEditor extends JFrame {
                     TitledBorder.LEFT,
                     TitledBorder.TOP,
                     new Font("Arial", Font.BOLD, 12),
-                    HIGHLIGHT_COLOR_GREEN // Changed to green highlight
+                    HIGHLIGHT_COLOR_GREEN
             ));
         }
 
         public void setAudioData(byte[] audioData) {
             this.audioData = audioData;
-            repaint();
+            repaint(); // Request repaint when audio data changes
         }
 
         @Override
@@ -2849,23 +3022,26 @@ public class SoundEffectEditor extends JFrame {
                 g2d.setStroke(new BasicStroke(1)); // Thin line for waveform
                 Path2D.Float path = new Path2D.Float();
 
-                int sampleSize = outputBitDepth / 8;
+                int sampleSize = outputBitDepth / 8; // Bytes per sample (1 for 8-bit, 2 for 16-bit)
                 int numSamples = audioData.length / sampleSize;
 
                 if (numSamples == 0) return;
 
                 float xScale = (float) width / numSamples;
-                float yScale = height / 2.0f; // Center the waveform
+                float yScale = height / 2.0f; // Center the waveform vertically
 
+                // Get the first sample value
                 float firstSampleValue;
                 if (outputBitDepth == 8) {
                     firstSampleValue = audioData[0];
-                } else { // 16-bit
+                } else { // 16-bit (little-endian)
                     firstSampleValue = (short) (((audioData[1] & 0xFF) << 8) | (audioData[0] & 0xFF));
                 }
 
+                // Move to the starting point of the waveform
                 path.moveTo(0, yScale - (firstSampleValue * yScale / (outputBitDepth == 8 ? 128.0f : 32768.0f)));
 
+                // Draw lines for subsequent samples
                 for (int i = 1; i < numSamples; i++) {
                     float x = i * xScale;
                     float sampleValue;
@@ -2904,7 +3080,7 @@ public class SoundEffectEditor extends JFrame {
 
         public void setFilter(SoundFilter filter) {
             this.filter = filter;
-            repaint();
+            repaint(); // Request repaint when filter data changes
         }
 
         @Override
@@ -2923,16 +3099,19 @@ public class SoundEffectEditor extends JFrame {
                 g2d.drawLine(i * width / 10, 0, i * width / 10, height); // Vertical
             }
 
+            // Only draw filter line if filter is active (not null and has pairs)
             if (filter != null && (filter.pairs[0] > 0 || filter.pairs[1] > 0)) {
                 g2d.setColor(lineColor);
                 g2d.setStroke(new BasicStroke(2)); // Thicker line for emphasis
                 Path2D.Float path = new Path2D.Float();
-                float unity0Normalized = (float) filter.unity[0] / 65535.0f;
+                float unity0Normalized = (float) filter.unity[0] / 65535.0f; // Normalize unity values
                 float unity1Normalized = (float) filter.unity[1] / 65535.0f;
 
+                // Map normalized values to Y-coordinates (inverted for display)
                 int startY = (int) (height * (1.0f - unity0Normalized));
                 int endY = (int) (height * (1.0f - unity1Normalized));
 
+                // Draw a simple line representing the filter's unity response
                 path.moveTo(0, startY);
                 path.lineTo(width, endY);
                 g2d.draw(path);
