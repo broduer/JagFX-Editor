@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JagFX Editor: RuneScape Sound Effects v3 (Web)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background-color: #1e1e1e; /* BG_DEFAULT_FRAME */
+            color: #dcdcdc; /* TEXT_COLOR_LIGHT */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a4a4a;
+            border-radius: 8px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5a5a5a;
+        }
+
+        /* General panel styling - reduced padding */
+        .panel {
+            background-color: #2d2d2d; /* PANEL_BG */
+            border: 1px solid #3c3c3c; /* BORDER_COLOR */
+            border-radius: 6px;
+            padding: 0.5rem; /* Further reduced from 0.75rem */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Titles within panels */
+        .panel-title {
+            color: #00ff00; /* HIGHLIGHT_COLOR_GREEN */
+            font-weight: 500;
+            font-size: 0.9rem; /* Further reduced from 1rem */
+            margin-bottom: 0.4rem; /* Further reduced from 0.5rem */
+            padding-bottom: 0.2rem; /* Further reduced from 0.3rem */
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        /* Input fields and selects - slightly smaller padding and font size */
+        input,
+        select {
+            background-color: #464646; /* BUTTON_BG */
+            color: #dcdcdc;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            padding: 0.2rem 0.4rem; /* Further reduced from 0.25rem 0.5rem */
+            font-size: 0.75rem; /* Further reduced from 0.8rem */
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus,
+        select:focus {
+            border-color: #00ff00;
+        }
+
+        /* Sliders (range inputs) - slightly thinner */
+        input[type="range"] {
+            height: 4px; /* Further reduced from 6px */
+        }
+        input[type="range"]::-webkit-slider-thumb,
+        input[type="range"]::-moz-range-thumb {
+            width: 14px; /* Further reduced from 16px */
+            height: 14px; /* Further reduced from 16px */
+        }
+
+        /* Buttons - reduced padding and font size */
+        .btn {
+            padding: 0.25rem 0.5rem; /* Further reduced from 0.3rem 0.6rem */
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 0.75rem; /* Further reduced from 0.8rem */
+            transition: background-color 0.2s, border-color 0.2s;
+            border: 1px solid #3c3c3c;
+            cursor: pointer;
+        }
+        .btn-green { background-color: #34d399; color: white; }
+        .btn-green:hover { background-color: #10b981; }
+        .btn-blue { background-color: #3b82f6; color: white; }
+        .btn-blue:hover { background-color: #2563eb; }
+        .btn-red { background-color: #ef4444; color: white; }
+        .btn-red:hover { background-color: #dc2626; }
+
+        /* Tone List Item - reduced padding and font size */
+        .tone-list-item {
+            padding: 0.25rem 0.4rem; /* Further reduced from 0.3rem 0.5rem */
+            font-size: 0.75rem; /* Further reduced from 0.8rem */
+        }
+
+        /* Canvas styling */
+        canvas {
+            background-color: #000000; /* GRAPH_BG */
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Hidden class for optional sections */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Specific styling for filter pair controls - reduced padding and font size */
+        .filter-pair-control {
+            gap: 0.2rem; /* Further reduced gap */
+            margin-bottom: 0.2rem; /* Further reduced margin */
+            padding: 0.2rem; /* Further reduced padding */
+        }
+        .filter-pair-control label {
+            font-size: 0.7rem; /* Further reduced font size */
+        }
+        .filter-pair-control input {
+            font-size: 0.7rem; /* Further reduced font size */
+            padding: 0.15rem 0.3rem; /* Further reduced input padding */
+        }
+
+        /* Custom utility for very small text */
+        .text-xxs {
+            font-size: 0.65rem; /* Approximately 10.4px */
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen p-1 md:p-2"> <div class="top-bar panel flex flex-wrap gap-1 mb-1 items-center justify-center lg:justify-start"> <label class="text-sm font-medium text-white">Sound Effect:</label>
+    <button id="playFullEffect" class="btn btn-green">Play All</button>
+    <button id="playSelectedTone" class="btn btn-blue">Play Tone</button>
+    <button id="stopSound" class="btn btn-red">Stop</button>
+    <button id="addTone" class="btn btn-blue">+</button>
+    <button id="removeTone" class="btn btn-red">-</button>
+    <button id="saveJagFX" class="btn btn-blue">Save...</button>
+    <input type="file" id="importFile" accept=".jfx,.dat" class="hidden">
+    <label for="importFile" class="btn btn-blue cursor-pointer">Import...</label>
+    <button id="exportWav" class="btn btn-blue">Export WAV</button>
+
+    <label for="outputBitDepth" class="text-xs font-medium text-white ml-auto lg:ml-1">Bit Depth:</label> <select id="outputBitDepth" class="w-16 text-xs">
+        <option value="8">8-bit</option>
+        <option value="16">16-bit</option>
+    </select>
+</div>
+
+<div class="flex flex-1 flex-col lg:flex-row gap-1"> <div class="flex flex-col lg:w-1/2 xl:w-2/5 gap-1"> <div class="panel flex-none">
+    <h3 class="panel-title">Tones</h3>
+    <div id="toneList" class="max-h-24 overflow-y-auto border border-[#3c3c3c] rounded-md"> </div>
+</div>
+
+    <div id="selectedToneControls" class="panel flex-1 hidden">
+        <h3 class="panel-title">Tone Parameters <span id="currentToneIndexDisplay" class="text-white text-xxs">(1)</span></h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-1 mb-2"> <div>
+            <label for="duration" class="block text-xs font-medium mb-0.5">Duration (ms):</label>
+            <input type="range" id="duration" min="0" max="5000" value="500" class="w-full">
+            <span class="block text-right text-xxs text-gray-400" id="durationValue">500</span>
+        </div>
+            <div>
+                <label for="offset" class="block text-xs font-medium mb-0.5">Offset (ms):</label>
+                <input type="range" id="offset" min="0" max="2000" value="0" class="w-full">
+                <span class="block text-right text-xxs text-gray-400" id="offsetValue">0</span>
+            </div>
+            <div>
+                <label for="delayTime" class="block text-xs font-medium mb-0.5">Delay Time (ms):</label>
+                <input type="range" id="delayTime" min="0" max="1000" value="0" class="w-full">
+                <span class="block text-right text-xxs text-gray-400" id="delayTimeValue">0</span>
+            </div>
+            <div>
+                <label for="delayDecay" class="block text-xs font-medium mb-0.5">Delay Decay (%):</label>
+                <input type="range" id="delayDecay" min="0" max="100" value="100" class="w-full">
+                <span class="block text-right text-xxs text-gray-400" id="delayDecayValue">100</span>
+            </div>
+        </div>
+
+        <h4 class="panel-title text-sm">Oscillator</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-1"> <div>
+            <label for="oscillatorSelect" class="block text-xs font-medium mb-0.5">Osc:</label>
+            <select id="oscillatorSelect" class="w-full text-xs">
+                <option value="0">1</option>
+                <option value="1">2</option>
+                <option value="2">3</option>
+                <option value="3">4</option>
+                <option value="4">5</option>
+            </select>
+            <span class="block text-right text-xxs text-gray-400 mt-0.5">(<span id="currentOscillatorIndexDisplay">0</span>)</span>
+        </div>
+            <div class="col-span-full md:col-span-1">
+                <label for="oscVolume" class="block text-xs font-medium mb-0.5">Vol:</label>
+                <input type="range" id="oscVolume" min="0" max="65535" value="0" class="w-full">
+                <span class="block text-right text-xxs text-gray-400" id="oscVolumeValue">0</span>
+            </div>
+            <div class="col-span-full md:col-span-1">
+                <label for="oscPitch" class="block text-xs font-medium mb-0.5">Pitch:</label>
+                <input type="range" id="oscPitch" min="-100" max="100" value="0" class="w-full">
+                <span class="block text-right text-xxs text-gray-400" id="oscPitchValue">0</span>
+            </div>
+            <div class="col-span-full md:col-span-1">
+                <label for="oscDelay" class="block text-xs font-medium mb-0.5">Delay:</label>
+                <input type="range" id="oscDelay" min="0" max="9" value="0" class="w-full">
+                <span class="block text-right text-xxs text-gray-400" id="oscDelayValue">0</span>
+            </div>
+        </div>
+
+        <div class="mt-2 flex flex-col gap-1 overflow-y-auto max-h-[calc(100vh-250px)]"> <div class="panel p-2 border border-[#3c3c3c] rounded-md">
+            <h5 class="panel-title text-xs">Pitch Env</h5>
+            <div class="grid grid-cols-2 gap-0.5"> <label for="pitchEnvForm" class="text-xxs">Form:</label>
+                <select id="pitchEnvForm" class="text-xxs">
+                    <option value="1">Square</option>
+                    <option value="2">Sine</option>
+                    <option value="3">Triangle</option>
+                    <option value="4">Noise</option>
+                    <option value="0">Off</option>
+                </select>
+                <label for="pitchEnvStart" class="text-xxs">Start:</label>
+                <input type="number" id="pitchEnvStart" value="0" class="text-xxs">
+                <label for="pitchEnvEnd" class="text-xxs">End:</label>
+                <input type="number" id="pitchEnvEnd" value="0" class="text-xxs">
+            </div>
+        </div>
+
+            <div class="panel p-2 border border-[#3c3c3c] rounded-md">
+                <h5 class="panel-title text-xs">Vol Env</h5>
+                <div class="grid grid-cols-2 gap-0.5"> <label for="volumeEnvForm" class="text-xxs">Form:</label>
+                    <select id="volumeEnvForm" class="text-xxs">
+                        <option value="1">Square</option>
+                        <option value="2">Sine</option>
+                        <option value="3">Triangle</option>
+                        <option value="4">Noise</option>
+                        <option value="0">Off</option>
+                    </select>
+                    <label for="volumeEnvStart" class="text-xxs">Start:</label>
+                    <input type="number" id="volumeEnvStart" value="0" class="text-xxs">
+                    <label for="volumeEnvEnd" class="text-xxs">End:</label>
+                    <input type="number" id="volumeEnvEnd" value="0" class="text-xxs">
+                </div>
+            </div>
+
+            <div class="panel p-2 border border-[#3c3c3c] rounded-md">
+                <input type="checkbox" id="pitchModifierEnabled" class="mr-1">
+                <label for="pitchModifierEnabled" class="text-xs font-medium text-white">Pitch Mod</label>
+                <div id="pitchModifierControls" class="hidden mt-1">
+                    <h5 class="panel-title text-xxs">Env</h5>
+                    <div class="grid grid-cols-2 gap-0.5"> <label for="pitchModEnvForm" class="text-xxs">Form:</label>
+                        <select id="pitchModEnvForm" class="text-xxs">
+                            <option value="1">Square</option>
+                            <option value="2">Sine</option>
+                            <option value="3">Triangle</option>
+                            <option value="4">Noise</option>
+                            <option value="0">Off</option>
+                        </select>
+                        <label for="pitchModEnvStart" class="text-xxs">Start:</label>
+                        <input type="number" id="pitchModEnvStart" value="0" class="text-xxs">
+                        <label for="pitchModEnvEnd" class="text-xxs">End:</label>
+                        <input type="number" id="pitchModEnvEnd" value="0" class="text-xxs">
+                    </div>
+                    <h5 class="panel-title text-xxs mt-1">Amp Env</h5>
+                    <div class="grid grid-cols-2 gap-0.5"> <label for="pitchModAmpEnvForm" class="text-xxs">Form:</label>
+                        <select id="pitchModAmpEnvForm" class="text-xxs">
+                            <option value="1">Square</option>
+                            <option value="2">Sine</option>
+                            <option value="3">Triangle</option>
+                            <option value="4">Noise</option>
+                            <option value="0">Off</option>
+                        </select>
+                        <label for="pitchModAmpEnvStart" class="text-xxs">Start:</label>
+                        <input type="number" id="pitchModAmpEnvStart" value="0" class="text-xxs">
+                        <label for="pitchModAmpEnvEnd" class="text-xxs">End:</label>
+                        <input type="number" id="pitchModAmpEnvEnd" value="0" class="text-xxs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel p-2 border border-[#3c3c3c] rounded-md">
+                <input type="checkbox" id="volumeMultiplierEnabled" class="mr-1">
+                <label for="volumeMultiplierEnabled" class="text-xs font-medium text-white">Vol Mul</label>
+                <div id="volumeMultiplierControls" class="hidden mt-1">
+                    <h5 class="panel-title text-xxs">Env</h5>
+                    <div class="grid grid-cols-2 gap-0.5"> <label for="volumeMultiplierForm" class="text-xxs">Form:</label>
+                        <select id="volumeMultiplierForm" class="text-xxs">
+                            <option value="1">Square</option>
+                            <option value="2">Sine</option>
+                            <option value="3">Triangle</option>
+                            <option value="4">Noise</option>
+                            <option value="0">Off</option>
+                        </select>
+                        <label for="volumeMultiplierStart" class="text-xxs">Start:</label>
+                        <input type="number" id="volumeMultiplierStart" value="0" class="text-xxs">
+                        <label for="volumeMultiplierEnd" class="text-xxs">End:</label>
+                        <input type="number" id="volumeMultiplierEnd" value="0" class="text-xxs">
+                    </div>
+                    <h5 class="panel-title text-xxs mt-1">Amp Env</h5>
+                    <div class="grid grid-cols-2 gap-0.5"> <label for="volumeMultiplierAmpForm" class="text-xxs">Form:</label>
+                        <select id="volumeMultiplierAmpForm" class="text-xxs">
+                            <option value="1">Square</option>
+                            <option value="2">Sine</option>
+                            <option value="3">Triangle</option>
+                            <option value="4">Noise</option>
+                            <option value="0">Off</option>
+                        </select>
+                        <label for="volumeMultiplierAmpStart" class="text-xxs">Start:</label>
+                        <input type="number" id="volumeMultiplierAmpStart" value="0" class="text-xxs">
+                        <label for="volumeMultiplierAmpEnd" class="text-xxs">End:</label>
+                        <input type="number" id="volumeMultiplierAmpEnd" value="0" class="text-xxs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel p-2 border border-[#3c3c3c] rounded-md">
+                <input type="checkbox" id="releaseEnabled" class="mr-1">
+                <label for="releaseEnabled" class="text-xs font-medium text-white">Release</label>
+                <div id="releaseControls" class="hidden mt-1">
+                    <h5 class="panel-title text-xxs">Env</h5>
+                    <div class="grid grid-cols-2 gap-0.5"> <label for="releaseForm" class="text-xxs">Form:</label>
+                        <select id="releaseForm" class="text-xxs">
+                            <option value="1">Square</option>
+                            <option value="2">Sine</option>
+                            <option value="3">Triangle</option>
+                            <option value="4">Noise</option>
+                            <option value="0">Off</option>
+                        </select>
+                        <label for="releaseStart" class="text-xxs">Start:</label>
+                        <input type="number" id="releaseStart" value="0" class="text-xxs">
+                        <label for="releaseEnd" class="text-xxs">End:</label>
+                        <input type="number" id="releaseEnd" value="0" class="text-xxs">
+                    </div>
+                    <h5 class="panel-title text-xxs mt-1">Attack Env</h5>
+                    <div class="grid grid-cols-2 gap-0.5"> <label for="attackForm" class="text-xxs">Form:</label>
+                        <select id="attackForm" class="text-xxs">
+                            <option value="1">Square</option>
+                            <option value="2">Sine</option>
+                            <option value="3">Triangle</option>
+                            <option value="4">Noise</option>
+                            <option value="0">Off</option>
+                        </select>
+                        <label for="attackStart" class="text-xxs">Start:</label>
+                        <input type="number" id="attackStart" value="0" class="text-xxs">
+                        <label for="attackEnd" class="text-xxs">End:</label>
+                        <input type="number" id="attackEnd" value="0" class="text-xxs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel p-2 border border-[#3c3c3c] rounded-md">
+                <h5 class="panel-title text-xs">Filter</h5>
+                <input type="checkbox" id="filterEnabled" class="mr-1">
+                <label for="filterEnabled" class="text-xs font-medium text-white">Enable</label>
+                <div id="filterControls" class="hidden mt-1">
+                    <div class="grid grid-cols-2 gap-0.5 mb-1"> <div>
+                        <label for="filterUnity0" class="block text-xxs font-medium mb-0.5">Unity 0:</label>
+                        <input type="range" id="filterUnity0" min="0" max="65535" value="0" class="w-full">
+                        <span class="block text-right text-xxs text-gray-400" id="filterUnity0Value">0</span>
+                    </div>
+                        <div>
+                            <label for="filterUnity1" class="block text-xxs font-medium mb-0.5">Unity 1:</label>
+                            <input type="range" id="filterUnity1" min="0" max="65535" value="0" class="w-full">
+                            <span class="block text-right text-xxs text-gray-400" id="filterUnity1Value">0</span>
+                        </div>
+                        <div>
+                            <label for="filterPairs0" class="block text-xxs font-medium mb-0.5">Pairs 0:</label>
+                            <input type="range" id="filterPairs0" min="0" max="4" value="0" class="w-full">
+                            <span class="block text-right text-xxs text-gray-400" id="filterPairs0Value">0</span>
+                        </div>
+                        <div>
+                            <label for="filterPairs1" class="block text-xxs font-medium mb-0.5">Pairs 1:</label>
+                            <input type="range" id="filterPairs1" min="0" max="4" value="0" class="w-full">
+                            <span class="block text-right text-xxs text-gray-400" id="filterPairs1Value">0</span>
+                        </div>
+                    </div>
+                    <div id="filterCoefficientsPanel" class="border border-[#3c3c3c] rounded-md p-1">
+                        <p class="text-xxs text-gray-400">Adjust Pairs 0/1 to see coefficients.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <div class="flex flex-col lg:w-1/2 xl:w-3/5 gap-1"> <div class="panel flex-1">
+        <h3 class="panel-title">Waveform</h3>
+        <canvas id="waveformCanvas" class="w-full h-full min-h-[80px]"></canvas> </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-1 flex-1"> <div class="panel">
+            <h3 class="panel-title text-sm">Pitch Env</h3>
+            <canvas id="pitchEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Vol Env</h3>
+                <canvas id="volumeEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Filter Freq</h3>
+                <canvas id="filterCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Pitch Mod</h3>
+                <canvas id="pitchModifierEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Pitch Mod Amp</h3>
+                <canvas id="pitchModAmpEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Vol Mul</h3>
+                <canvas id="volumeMultiplierEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Vol Mul Amp</h3>
+                <canvas id="volumeMultiplierAmplitudeEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Release</h3>
+                <canvas id="releaseEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+            <div class="panel">
+                <h3 class="panel-title text-sm">Attack</h3>
+                <canvas id="attackEnvelopeCanvas" class="w-full h-full min-h-[60px]"></canvas> </div>
+        </div>
+    </div>
+</div>
+
+<script src="SoundEffectEditor.js"></script>
+<script>
+    // Add event listeners for range inputs to display their current value
+    document.querySelectorAll('input:not([type="checkbox"], [type="file"])').forEach(input => {
+        const valueDisplay = document.getElementById(input.id + 'Value');
+        if (valueDisplay) {
+            input.addEventListener('input', () => {
+                valueDisplay.textContent = input.value;
+            });
+        }
+    });
+    // Initial update for range input values
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('input:not([type="checkbox"], [type="file"])').forEach(input => {
+            const valueDisplay = document.getElementById(input.id + 'Value');
+            if (valueDisplay) {
+                valueDisplay.textContent = input.value;
+            }
+        });
+    });
+</script>
+</body>
+</html>
